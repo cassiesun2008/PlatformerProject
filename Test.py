@@ -3,7 +3,7 @@ import tkinter as tk
 # Game window size
 WINDOW_WIDTH = 800
 WINDOW_HEIGHT = 600
-
+rwretwretg = 5
 # Player settings
 PLAYER_WIDTH = 50
 PLAYER_HEIGHT = 60
