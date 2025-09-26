@@ -1,113 +1,282 @@
-import tkinter as tk
+import pygame
+import sys
 
-# Game window size
-WINDOW_WIDTH = 800
-WINDOW_HEIGHT = 600
-rwretwretg = 5
-# Player settings
-PLAYER_WIDTH = 50
-PLAYER_HEIGHT = 60
-PLAYER_COLOR = "blue"
-GRAVITY = 1
-JUMP_STRENGTH = -20
-MOVE_SPEED = 10
+# -------------- Config --------------
+WIDTH, HEIGHT = 960, 540
+TITLE = "Pygame Platformer Starter"
+FPS = 60
 
-# Platform settings
-PLATFORM_COLOR = "green"
+# World physics
+GRAVITY = 2000.0          # px/s^2
+MOVE_SPEED = 300.0        # px/s
+AIR_CONTROL = 0.65        # fraction of MOVE_SPEED allowed while airborne
+JUMP_VELOCITY = -1000.0    # px/s (negative goes up)
+MAX_FALL_SPEED = 2000.0
 
-class PlatformerGame:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Platformer - No Pygame")
-        self.canvas = tk.Canvas(root, width=WINDOW_WIDTH, height=WINDOW_HEIGHT, bg="white")
-        self.canvas.pack()
+# Player
+PLAYER_SIZE = (40, 56)
+START_POS = (96, 96)
 
-        # Player setup
-        self.player = self.canvas.create_rectangle(100, 500, 100 + PLAYER_WIDTH, 500 + PLAYER_HEIGHT, fill=PLAYER_COLOR)
-        self.player_vel_y = 0
+BG_COLOR = (28, 28, 40)
+FG_COLOR = (230, 230, 230)
+ACCENT = (120, 180, 255)
+PLATFORM_COLOR = (70, 120, 160)
+
+# -------------- Level data --------------
+# Use simple ASCII tiles: '#' = solid, 'P' = player start, '-' = empty
+LEVEL_MAP = [
+    "----------------------------------------------------------------",
+    "----------------------------------------------------------------",
+    "----------------------------------------------------------------",
+    "--------------------------###-----------------------------------",
+    "------------------------------###-------------------------------",
+    "---------------------###----------------------------------------",
+    "--------------------------###-----------------------------------",
+    "-------------###------------------------###---------------------",
+    "----------------------------------------------------------------",
+    "--------P-------------------------------------------------------",
+    "####################------###################-------------------",
+    "####################------###################---------##########",
+    "####################------###################---------##########",
+]
+
+TILE_SIZE = 48
+
+
+# -------------- Helpers --------------
+def rect_from_grid(x, y, w=1, h=1):
+    return pygame.Rect(x * TILE_SIZE, y * TILE_SIZE, w * TILE_SIZE, h * TILE_SIZE)
+
+
+# -------------- Game Objects --------------
+class Platform(pygame.sprite.Sprite):
+    def __init__(self, rect: pygame.Rect):
+        super().__init__()
+        self.rect = rect
+
+    def draw(self, surf, camera):
+        r = self.rect.move(-camera.x, -camera.y)
+        pygame.draw.rect(surf, PLATFORM_COLOR, r, border_radius=6)
+
+
+class Player(pygame.sprite.Sprite):
+    def __init__(self, pos):
+        super().__init__()
+        self.rect = pygame.Rect(pos[0], pos[1], *PLAYER_SIZE)
+        self.vel = pygame.Vector2(0, 0)
+        self.on_ground = False
+        self.facing = 1  # 1 right, -1 left
+        self.coyote_time = 0.0        # small grace window after stepping off a ledge
+        self.jump_buffer = 0.0        # small window to queue jump before landing
+
+    def update(self, dt, solids, input_dir, jump_pressed):
+        # ---- Horizontal movement
+        target_speed = MOVE_SPEED * input_dir
+        if not self.on_ground:
+            target_speed *= AIR_CONTROL
+
+        accel = 5000.0  # quick responsive accel
+        if abs(target_speed - self.vel.x) < accel * dt:
+            self.vel.x = target_speed
+        else:
+            self.vel.x += accel * dt * (1 if target_speed > self.vel.x else -1)
+
+        if input_dir != 0:
+            self.facing = 1 if input_dir > 0 else -1
+
+        # ---- Timers
+        # Coyote time lets you jump a fraction after walking off edges.
+        COYOTE_WINDOW = 0.08
+        JUMP_BUFFER_WINDOW = 0.10
+
+        if self.on_ground:
+            self.coyote_time = COYOTE_WINDOW
+        else:
+            self.coyote_time = max(0.0, self.coyote_time - dt)
+
+        if jump_pressed:
+            self.jump_buffer = JUMP_BUFFER_WINDOW
+        else:
+            self.jump_buffer = max(0.0, self.jump_buffer - dt)
+
+        # ---- Jump
+        if self.jump_buffer > 0.0 and (self.on_ground or self.coyote_time > 0.0):
+            self.vel.y = JUMP_VELOCITY
+            self.on_ground = False
+            self.coyote_time = 0.0
+            self.jump_buffer = 0.0
+
+        # ---- Gravity
+        self.vel.y += GRAVITY * dt
+        if self.vel.y > MAX_FALL_SPEED:
+            self.vel.y = MAX_FALL_SPEED
+
+        # ---- Move & resolve collisions (separate axis)
         self.on_ground = False
 
-        # Platform setup
-        self.platforms = []
-        self.create_platform(0, WINDOW_HEIGHT - 40, WINDOW_WIDTH, 40)  # Ground
-        self.create_platform(300, 450, 200, 20)
-        self.create_platform(150, 300, 150, 20)
-        self.create_platform(500, 200, 150, 20)
+        # X axis
+        self.rect.x += round(self.vel.x * dt)
+        for s in solids:
+            if self.rect.colliderect(s.rect):
+                if self.vel.x > 0:
+                    self.rect.right = s.rect.left
+                elif self.vel.x < 0:
+                    self.rect.left = s.rect.right
+                self.vel.x = 0
 
-        # Input state
-        self.left_pressed = False
-        self.right_pressed = False
-
-        # Key bindings
-        self.root.bind("<KeyPress>", self.key_down)
-        self.root.bind("<KeyRelease>", self.key_up)
-
-        # Start game loop
-        self.update()
-
-    def create_platform(self, x, y, width, height):
-        platform = self.canvas.create_rectangle(x, y, x + width, y + height, fill=PLATFORM_COLOR)
-        self.platforms.append(platform)
-
-    def key_down(self, event):
-        if event.keysym == "Left":
-            self.left_pressed = True
-        elif event.keysym == "Right":
-            self.right_pressed = True
-        elif event.keysym == "Up":
-            if self.on_ground:
-                self.player_vel_y = JUMP_STRENGTH
-
-    def key_up(self, event):
-        if event.keysym == "Left":
-            self.left_pressed = False
-        elif event.keysym == "Right":
-            self.right_pressed = False
-
-    def update(self):
-        # Horizontal movement
-        dx = 0
-        if self.left_pressed:
-            dx -= MOVE_SPEED
-        if self.right_pressed:
-            dx += MOVE_SPEED
-        self.canvas.move(self.player, dx, 0)
-
-        # Apply gravity
-        self.player_vel_y += GRAVITY
-        self.canvas.move(self.player, 0, self.player_vel_y)
-
-        # Collision detection
-        self.on_ground = False
-        player_coords = self.canvas.coords(self.player)
-        for platform in self.platforms:
-            platform_coords = self.canvas.coords(platform)
-            if self.check_collision(player_coords, platform_coords):
-                if self.player_vel_y >= 0:  # falling down
-                    self.canvas.coords(self.player,
-                        player_coords[0],
-                        platform_coords[1] - PLAYER_HEIGHT,
-                        player_coords[2],
-                        platform_coords[1]
-                    )
-                    self.player_vel_y = 0
+        # Y axis
+        self.rect.y += round(self.vel.y * dt)
+        for s in solids:
+            if self.rect.colliderect(s.rect):
+                if self.vel.y > 0:
+                    self.rect.bottom = s.rect.top
                     self.on_ground = True
-                    break
+                    self.vel.y = 0
+                elif self.vel.y < 0:
+                    self.rect.top = s.rect.bottom
+                    self.vel.y = 0
 
-        self.root.after(20, self.update)
+    def draw(self, surf, camera):
+        r = self.rect.move(-camera.x, -camera.y)
+        # body
+        pygame.draw.rect(surf, FG_COLOR, r, border_radius=8)
+        # face accent
+        eye_w = 6
+        eye_h = 8
+        y = r.y + r.height // 3
+        eye_x = r.centerx + (r.width // 4) * self.facing - (eye_w // 2)
+        pygame.draw.rect(surf, ACCENT, (eye_x, y, eye_w, eye_h), border_radius=2)
 
-    def check_collision(self, player, platform):
-        # Simple AABB collision check
-        px1, py1, px2, py2 = player
-        fx1, fy1, fx2, fy2 = platform
-        return (
-            px2 > fx1 and
-            px1 < fx2 and
-            py2 >= fy1 and
-            py1 < fy1
-        )
 
-# Run the game
-root = tk.Tk()
-game = PlatformerGame(root)
-root.mainloop()
+# -------------- Level builder --------------
+def build_level(level_map):
+    solids = []
+    player_start = START_POS
+    h = len(level_map)
+    w = max(len(row) for row in level_map)
+
+    for y in range(h):
+        for x in range(len(level_map[y])):
+            ch = level_map[y][x]
+            if ch == '#':
+                solids.append(Platform(rect_from_grid(x, y)))
+            elif ch == 'P':
+                player_start = (x * TILE_SIZE, y * TILE_SIZE - (PLAYER_SIZE[1] - TILE_SIZE))
+    return solids, player_start
+
+
+# -------------- Camera --------------
+class Camera:
+    def __init__(self):
+        self.x = 0
+        self.y = 0
+
+    def update(self, target_rect):
+        # Smooth-follow camera (lerp)
+        margin_x, margin_y = WIDTH * 0.35, HEIGHT * 0.4
+        target_x = target_rect.centerx - WIDTH // 2
+        target_y = target_rect.centery - HEIGHT // 2
+
+        # Keep player within soft margins to reduce camera jitter
+        if target_rect.centerx - self.x < margin_x:
+            self.x = target_rect.centerx - margin_x
+        elif target_rect.centerx - self.x > WIDTH - margin_x:
+            self.x = target_rect.centerx - (WIDTH - margin_x)
+
+        if target_rect.centery - self.y < margin_y:
+            self.y = target_rect.centery - margin_y
+        elif target_rect.centery - self.y > HEIGHT - margin_y:
+            self.y = target_rect.centery - (HEIGHT - margin_y)
+
+        # Clamp to world bounds (compute from level)
+        world_w = max(len(row) for row in LEVEL_MAP) * TILE_SIZE
+        world_h = len(LEVEL_MAP) * TILE_SIZE
+        self.x = max(0, min(self.x, world_w - WIDTH))
+        self.y = max(0, min(self.y, world_h - HEIGHT))
+
+
+# -------------- Main --------------
+def main():
+    pygame.init()
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption(TITLE)
+    clock = pygame.time.Clock()
+    font = pygame.font.SysFont("verdana", 16)
+
+    solids, start = build_level(LEVEL_MAP)
+    player = Player(start)
+    camera = Camera()
+
+    # Turn platforms into a sprite group for easy iteration/draw
+    solid_group = pygame.sprite.Group(solids)
+
+    def reset():
+        nonlocal player
+        player = Player(start)
+
+    running = True
+    while running:
+        dt = clock.tick(FPS) / 1000.0  # seconds
+        jump_pressed = False
+        input_dir = 0
+
+        # ---------- Events ----------
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_ESCAPE, pygame.K_q):
+                    running = False
+                if event.key == pygame.K_r:
+                    reset()
+                if event.key in (pygame.K_SPACE, pygame.K_w, pygame.K_UP):
+                    jump_pressed = True
+
+        # Continuous input
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+            input_dir -= 1
+        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+            input_dir += 1
+        if keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]:
+            jump_pressed = True
+
+        # ---------- Update ----------
+        player.update(dt, solid_group, input_dir, jump_pressed)
+        camera.update(player.rect)
+
+        # ---------- Draw ----------
+        screen.fill(BG_COLOR)
+
+        # Parallax-ish background stripes (cheap depth)
+        stripe_h = 80
+        for i in range(0, HEIGHT // stripe_h + 2):
+            y = i * stripe_h - int(camera.y * 0.15) % stripe_h
+            pygame.draw.rect(screen, (24, 24, 34), (0, y, WIDTH, stripe_h), border_radius=0)
+
+        # Platforms
+        for s in solids:
+            s.draw(screen, camera)
+
+        # Player
+        player.draw(screen, camera)
+
+        # UI
+        ui_pad = 10
+        info = [
+            f"FPS: {clock.get_fps():.0f}",
+            "Move: ← → or A/D   Jump: Space/W/↑",
+            "Reset: R   Quit: Esc or Q",
+        ]
+        for i, line in enumerate(info):
+            text_surf = font.render(line, True, (200, 200, 210))
+            screen.blit(text_surf, (ui_pad, ui_pad + i * 18))
+
+        pygame.display.flip()
+
+    pygame.quit()
+    sys.exit()
+
+
+if __name__ == "__main__":
+    main()
