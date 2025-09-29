@@ -10,7 +10,7 @@ FPS = 60
 GRAVITY = 2000.0          # px/s^2
 MOVE_SPEED = 300.0        # px/s
 AIR_CONTROL = 0.65        # fraction of MOVE_SPEED allowed while airborne
-JUMP_VELOCITY = -1000.0    # px/s (negative goes up)
+JUMP_VELOCITY = -800.0    # px/s (negative goes up)
 MAX_FALL_SPEED = 2000.0
 
 # Player
