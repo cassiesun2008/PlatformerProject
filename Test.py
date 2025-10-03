@@ -21,6 +21,7 @@ BG_COLOR = (28, 28, 40)
 FG_COLOR = (230, 230, 230)
 ACCENT = (120, 180, 255)
 PLATFORM_COLOR = (70, 120, 160)
+LADDAR_COLOR = (150, 75, 0)
 
 # -------------- Level data --------------
 # Use simple ASCII tiles: '#' = solid, 'P' = player start, '-' = empty
@@ -32,9 +33,9 @@ LEVEL_MAP = [
     "------------------------------###-------------------------------",
     "---------------------###----------------------------------------",
     "--------------------------###-----------------------------------",
-    "-------------###------------------------###---------------------",
-    "----------------------------------------------------------------",
-    "--------P-------------------------------------------------------",
+    "-------------L##------------------------###---------------------",
+    "-------------L--------------------------------------------------",
+    "--------P----L--------------------------------------------------",
     "####################------###################-------------------",
     "####################------###################---------##########",
     "####################------###################---------##########",
@@ -50,13 +51,20 @@ def rect_from_grid(x, y, w=1, h=1):
 
 # -------------- Game Objects --------------
 class Platform(pygame.sprite.Sprite):
-    def __init__(self, rect: pygame.Rect):
+    def __init__(self, rect: pygame.Rect, is_ladder=False):
         super().__init__()
         self.rect = rect
+        self.is_ladder = is_ladder
 
     def draw(self, surf, camera):
         r = self.rect.move(-camera.x, -camera.y)
-        pygame.draw.rect(surf, PLATFORM_COLOR, r, border_radius=6)
+        if not self.is_ladder:
+            pygame.draw.rect(surf, PLATFORM_COLOR, r, border_radius=6)
+        else:
+            pygame.draw.rect(surf, LADDAR_COLOR, r, border_radius=6)
+
+# class Laddar(Platform):
+#     def __init__(self, rect: pygame.Rect):
 
 
 class Player(pygame.sprite.Sprite):
@@ -68,12 +76,20 @@ class Player(pygame.sprite.Sprite):
         self.facing = 1  # 1 right, -1 left
         self.coyote_time = 0.0        # small grace window after stepping off a ledge
         self.jump_buffer = 0.0        # small window to queue jump before landing
+        self.is_colliding_ladder = False
 
     def update(self, dt, solids, input_dir, jump_pressed):
+
+        for s in solids:
+            if self.rect.colliderect(s.rect) and s.is_ladder:
+                is_colliding_ladder = True
+
         # ---- Horizontal movement
         target_speed = MOVE_SPEED * input_dir
-        if not self.on_ground:
-            target_speed *= AIR_CONTROL
+
+        if not self.is_colliding_ladder:
+            if not self.on_ground:
+                target_speed *= AIR_CONTROL
 
         accel = 5000.0  # quick responsive accel
         if abs(target_speed - self.vel.x) < accel * dt:
@@ -86,6 +102,9 @@ class Player(pygame.sprite.Sprite):
 
         # ---- Timers
         # Coyote time lets you jump a fraction after walking off edges.
+
+
+
         COYOTE_WINDOW = 0.08
         JUMP_BUFFER_WINDOW = 0.10
 
@@ -100,7 +119,7 @@ class Player(pygame.sprite.Sprite):
             self.jump_buffer = max(0.0, self.jump_buffer - dt)
 
         # ---- Jump
-        if self.jump_buffer > 0.0 and (self.on_ground or self.coyote_time > 0.0):
+        if self.jump_buffer > 0.0 and (self.on_ground or self.coyote_time > 0.0) and self.rect.colliderect(ACC):
             self.vel.y = JUMP_VELOCITY
             self.on_ground = False
             self.coyote_time = 0.0
@@ -162,6 +181,8 @@ def build_level(level_map):
                 solids.append(Platform(rect_from_grid(x, y)))
             elif ch == 'P':
                 player_start = (x * TILE_SIZE, y * TILE_SIZE - (PLAYER_SIZE[1] - TILE_SIZE))
+            elif ch == 'L':
+                solids.append(Platform(rect_from_grid(x, y), True))
     return solids, player_start
 
 
@@ -239,6 +260,7 @@ def main():
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
             input_dir += 1
         if keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]:
+
             jump_pressed = True
 
         # ---------- Update ----------
