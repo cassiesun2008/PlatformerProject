@@ -25,19 +25,20 @@ PLATFORM_COLOR = (70, 120, 160)
 # -------------- Level data --------------
 # Use simple ASCII tiles: '#' = solid, 'P' = player start, '-' = empty
 LEVEL_MAP = [
-    "----------------------------------------------------------------",
-    "----------------------------------------------------------------",
-    "----------------------------------------------------------------",
-    "--------------------------###-----------------------------------",
-    "------------------------------###-------------------------------",
-    "---------------------###----------------------------------------",
-    "--------------------------###-----------------------------------",
-    "-------------###------------------------###---------------------",
-    "----------------------------------------------------------------",
-    "--------P-------------------------------------------------------",
-    "####################------###################-------------------",
-    "####################------###################---------##########",
-    "####################------###################---------##########",
+    "-----------------------------------------------------------------",
+    "------------------####-------------------------------------------",  #double jump ability here
+    "-----------------------------------------------------------------",
+    "-----------------------------------------------------------------",
+    "-----------------------------------------------------------------",
+    "-----------------------------------------------------------------",
+    "-----------------------------------------------##----------------",
+    "----------------------#####--------------------##----------------",   #ladder starts on platform then goes up to higher platform
+    "--------------#####-----------#####------------##----------------",   #2 #'s under the others when double jump works
+    "------------------------------#####------------------------------",
+    "--------P---------------------#####------##############-----##---",
+    "####################----------########---##############----------",
+    "####################----------########---##############----------",
+    "####################----------########---##############----------",
 ]
 
 TILE_SIZE = 48
@@ -66,8 +67,9 @@ class Player(pygame.sprite.Sprite):
         self.vel = pygame.Vector2(0, 0)
         self.on_ground = False
         self.facing = 1  # 1 right, -1 left
-        self.coyote_time = 0.0        # small grace window after stepping off a ledge
-        self.jump_buffer = 0.0        # small window to queue jump before landing
+        self.has_double_jump = True
+        self.jump_was_pressed = False
+
 
     def update(self, dt, solids, input_dir, jump_pressed):
         # ---- Horizontal movement
@@ -84,27 +86,15 @@ class Player(pygame.sprite.Sprite):
         if input_dir != 0:
             self.facing = 1 if input_dir > 0 else -1
 
-        # ---- Timers
-        # Coyote time lets you jump a fraction after walking off edges.
-        COYOTE_WINDOW = 0.08
-        JUMP_BUFFER_WINDOW = 0.10
-
-        if self.on_ground:
-            self.coyote_time = COYOTE_WINDOW
-        else:
-            self.coyote_time = max(0.0, self.coyote_time - dt)
-
-        if jump_pressed:
-            self.jump_buffer = JUMP_BUFFER_WINDOW
-        else:
-            self.jump_buffer = max(0.0, self.jump_buffer - dt)
-
-        # ---- Jump
-        if self.jump_buffer > 0.0 and (self.on_ground or self.coyote_time > 0.0):
-            self.vel.y = JUMP_VELOCITY
-            self.on_ground = False
-            self.coyote_time = 0.0
-            self.jump_buffer = 0.0
+        # ---- Jump (only on key press, no hold spam)
+        if jump_pressed and not self.jump_was_pressed:
+            if self.on_ground:
+                self.vel.y = JUMP_VELOCITY
+                self.on_ground = False
+                self.has_double_jump = True
+            elif self.has_double_jump:
+                self.vel.y = JUMP_VELOCITY
+                self.has_double_jump = False
 
         # ---- Gravity
         self.vel.y += GRAVITY * dt
@@ -132,9 +122,13 @@ class Player(pygame.sprite.Sprite):
                     self.rect.bottom = s.rect.top
                     self.on_ground = True
                     self.vel.y = 0
+                    self.has_double_jump = True  # reset on landing
                 elif self.vel.y < 0:
                     self.rect.top = s.rect.bottom
                     self.vel.y = 0
+
+        # ---- Update key state (for edge detection)
+        self.jump_was_pressed = jump_pressed
 
     def draw(self, surf, camera):
         r = self.rect.move(-camera.x, -camera.y)
