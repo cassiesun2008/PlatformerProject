@@ -132,7 +132,7 @@ class Player(pygame.sprite.Sprite):
         # X axis
         self.rect.x += round(self.vel.x * dt)
         for s in solids:
-            if self.rect.colliderect(s.rect):
+            if self.rect.colliderect(s.rect) and not s.is_ladder:
                 if self.vel.x > 0:
                     self.rect.right = s.rect.left
                 elif self.vel.x < 0:
@@ -142,7 +142,7 @@ class Player(pygame.sprite.Sprite):
         # Y axis
         self.rect.y += round(self.vel.y * dt)
         for s in solids:
-            if self.rect.colliderect(s.rect):
+            if self.rect.colliderect(s.rect) and not s.is_ladder:
                 if self.vel.y > 0:
                     self.rect.bottom = s.rect.top
                     self.on_ground = True
