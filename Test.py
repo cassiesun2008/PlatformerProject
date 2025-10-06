@@ -21,7 +21,7 @@ BG_COLOR = (28, 28, 40)
 FG_COLOR = (230, 230, 230)
 ACCENT = (120, 180, 255)
 PLATFORM_COLOR = (70, 120, 160)
-LADDAR_COLOR = (150, 75, 0)
+LADDER_COLOR = (150, 75, 0)
 
 # -------------- Level data --------------
 # Use simple ASCII tiles: '#' = solid, 'P' = player start, '-' = empty, 'L' = ladder, '*' = powerup
@@ -65,7 +65,7 @@ class Platform(pygame.sprite.Sprite):
         if not self.is_ladder:
             pygame.draw.rect(surf, PLATFORM_COLOR, r, border_radius=6)
         else:
-            pygame.draw.rect(surf, LADDAR_COLOR, r, border_radius=6)
+            pygame.draw.rect(surf, LADDER_COLOR, r, border_radius=6)
 
 # class Laddar(Platform):
 #     def __init__(self, rect: pygame.Rect):
@@ -78,17 +78,19 @@ class Player(pygame.sprite.Sprite):
         self.vel = pygame.Vector2(0, 0)
         self.on_ground = False
         self.facing = 1  # 1 right, -1 left
-        self.is_colliding_ladder = False
         self.can_double_jump = False
         self.has_double_jump = True
         self.jump_was_pressed = False
-
+        self.is_colliding_ladder = False
 
     def update(self, dt, solids, input_dir, jump_pressed):
 
-        for s in solids:
-            if self.rect.colliderect(s.rect) and s.is_ladder:
-                is_colliding_ladder = True
+        self.is_colliding_ladder = False
+
+        probe = self.rect.inflate(6, 0)  # widen a bit
+        self.is_colliding_ladder = any(
+            getattr(s, "is_ladder", False) and probe.colliderect(s.rect) for s in solids
+        )
 
         # ---- Horizontal movement
         target_speed = MOVE_SPEED * input_dir
@@ -106,23 +108,31 @@ class Player(pygame.sprite.Sprite):
         if input_dir != 0:
             self.facing = 1 if input_dir > 0 else -1
 
-        # ---- Jump (only on key press, no hold spam)
-        if jump_pressed and not self.jump_was_pressed:
-            if self.on_ground:
-                self.vel.y = JUMP_VELOCITY
-                self.on_ground = False
-                self.has_double_jump = self.can_double_jump
-            elif self.has_double_jump:
-                self.vel.y = JUMP_VELOCITY
-                self.has_double_jump = False
+        if not self.is_colliding_ladder:
+            # ---- Jump (only on key press, no hold spam)
+            if jump_pressed and not self.jump_was_pressed:
+                if self.on_ground:
+                    self.vel.y = JUMP_VELOCITY
+                    self.on_ground = False
+                    self.has_double_jump = True
+                elif self.has_double_jump:
+                    self.vel.y = JUMP_VELOCITY
+                    self.has_double_jump = False
 
-        # ---- Gravity
-        self.vel.y += GRAVITY * dt
-        if self.vel.y > MAX_FALL_SPEED:
-            self.vel.y = MAX_FALL_SPEED
+            # ---- Gravity
+            self.vel.y += GRAVITY * dt
+            if self.vel.y > MAX_FALL_SPEED:
+                self.vel.y = MAX_FALL_SPEED
 
-        # ---- Move & resolve collisions (separate axis)
-        self.on_ground = False
+            # ---- Move & resolve collisions (separate axis)
+            self.on_ground = False
+
+        keys = pygame.key.get_pressed()
+        if self.is_colliding_ladder:
+            if keys[pygame.K_UP]:
+                self.vel.y = -150
+            else:
+                self.vel.y = 150
 
         # X axis
         self.rect.x += round(self.vel.x * dt)
@@ -149,7 +159,6 @@ class Player(pygame.sprite.Sprite):
 
         # ---- Update key state (for edge detection)
         self.jump_was_pressed = jump_pressed
-
 
     def draw(self, surf, camera):
         r = self.rect.move(-camera.x, -camera.y)
@@ -283,7 +292,6 @@ def main():
 
         # ---------- Draw ----------
         screen.fill(BG_COLOR)
-
 
         # Parallax-ish background stripes (cheap depth)
         stripe_h = 80
