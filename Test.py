@@ -24,19 +24,23 @@ PLATFORM_COLOR = (70, 120, 160)
 LADDAR_COLOR = (150, 75, 0)
 
 # -------------- Level data --------------
-# Use simple ASCII tiles: '#' = solid, 'P' = player start, '-' = empty
+# Use simple ASCII tiles: '#' = solid, 'P' = player start, '-' = empty, 'L' = ladder, '*' = powerup
 LEVEL_MAP = [
     "----------------------------------------------------------------",
     "----------------------------------------------------------------",
+    "------------------*--------------------------------------------",
+    "-----------------###--------------------------------------------",
     "----------------------------------------------------------------",
-    "--------------------------###-----------------------------------",
-    "------------------------------###-------------------------------",
-    "---------------------###----------------------------------------",
-    "--------------------------###-----------------------------------",
-    "-------------L##------------------------###---------------------",
+    "----------------------------------------------------------------",
+    "--------------------L-------------------------------------------",
+    "--------------------L-------------------------------------------",
+    "-------------------####-------###-------------------------------",
+    "----------------------------------------------------------------",
+    "--------------##----------###-----------------------------------",
+    "-------------L--------------------------###---------------------",
     "-------------L--------------------------------------------------",
     "--------P----L--------------------------------------------------",
-    "####################------###################-------------------",
+    "####################------###################---------##########",
     "####################------###################---------##########",
     "####################------###################---------##########",
 ]
@@ -75,6 +79,7 @@ class Player(pygame.sprite.Sprite):
         self.on_ground = False
         self.facing = 1  # 1 right, -1 left
         self.is_colliding_ladder = False
+        self.can_double_jump = False
         self.has_double_jump = True
         self.jump_was_pressed = False
 
@@ -106,7 +111,7 @@ class Player(pygame.sprite.Sprite):
             if self.on_ground:
                 self.vel.y = JUMP_VELOCITY
                 self.on_ground = False
-                self.has_double_jump = True
+                self.has_double_jump = self.can_double_jump
             elif self.has_double_jump:
                 self.vel.y = JUMP_VELOCITY
                 self.has_double_jump = False
@@ -145,6 +150,7 @@ class Player(pygame.sprite.Sprite):
         # ---- Update key state (for edge detection)
         self.jump_was_pressed = jump_pressed
 
+
     def draw(self, surf, camera):
         r = self.rect.move(-camera.x, -camera.y)
         # body
@@ -156,10 +162,20 @@ class Player(pygame.sprite.Sprite):
         eye_x = r.centerx + (r.width // 4) * self.facing - (eye_w // 2)
         pygame.draw.rect(surf, ACCENT, (eye_x, y, eye_w, eye_h), border_radius=2)
 
+class Powerup(pygame.sprite.Sprite):
+    def __init__(self, rect: pygame.Rect):
+        super().__init__()
+        self.rect = rect
+
+    def draw(self, surf, camera):
+        r = self.rect.move(-camera.x, -camera.y)
+        pygame.draw.ellipse(surf, (255, 200, 50), r)  # gold orb
+
 
 # -------------- Level builder --------------
 def build_level(level_map):
     solids = []
+    powerups = []
     player_start = START_POS
     h = len(level_map)
     w = max(len(row) for row in level_map)
@@ -173,7 +189,9 @@ def build_level(level_map):
                 player_start = (x * TILE_SIZE, y * TILE_SIZE - (PLAYER_SIZE[1] - TILE_SIZE))
             elif ch == 'L':
                 solids.append(Platform(rect_from_grid(x, y), True))
-    return solids, player_start
+            elif ch == '*':
+                powerups.append(Powerup(rect_from_grid(x, y, 1, 1)))
+    return solids, powerups, player_start
 
 
 # -------------- Camera --------------
@@ -214,7 +232,8 @@ def main():
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("verdana", 16)
 
-    solids, start = build_level(LEVEL_MAP)
+    solids, powerups, start = build_level(LEVEL_MAP)
+    powerup_group = pygame.sprite.Group(powerups)
     player = Player(start)
     camera = Camera()
 
@@ -254,10 +273,17 @@ def main():
 
         # ---------- Update ----------
         player.update(dt, solid_group, input_dir, jump_pressed)
+        # Check powerup collisions
+        for p in powerups[:]:
+            if player.rect.colliderect(p.rect):
+                player.can_double_jump = True
+                powerups.remove(p)
+                powerup_group.remove(p)
         camera.update(player.rect)
 
         # ---------- Draw ----------
         screen.fill(BG_COLOR)
+
 
         # Parallax-ish background stripes (cheap depth)
         stripe_h = 80
@@ -268,6 +294,10 @@ def main():
         # Platforms
         for s in solids:
             s.draw(screen, camera)
+
+        #Powerups
+        for p in powerups:
+            p.draw(screen, camera)
 
         # Player
         player.draw(screen, camera)
