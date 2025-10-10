@@ -24,22 +24,21 @@ PLATFORM_COLOR = (70, 120, 160)
 LADDER_COLOR = (150, 75, 0)
 
 # -------------- Level data --------------
-# Use simple ASCII tiles: '#' = solid, 'P' = player start, '-' = empty, 'L' = ladder, '*' = powerup
 LEVEL_MAP = [
-    "----------------------------------------------------------------",
-    "----------------------------------------------------------------",
-    "------------------*--------------------------------------------",
-    "-----------------###-------------------------------------------",
-    "--------------------L#------------------------------------------",
-    "--------------------L-------------------------------------------",
-    "--------------------L-------------------------------------------",
-    "--------------------L-------------------------------------------",
-    "-------------------####-------###-------------------------------",
-    "----------------------------------------------------------------",
-    "---------------#----------###-----------------------------------",
-    "-------------L#-------------------------###---------------------",
-    "-------------L--------------------------------------------------",
-    "--------P----L--------------------------------------------------",
+    "##--------------------------------------------------------------",
+    "##--------------------------------------------------------------",
+    "##----------------*--------------------------------------------",
+    "##---------------###-------------------------------------------",
+    "##------------------L#------------------------------------------",
+    "##------------------L-------------------------------------------",
+    "##------------------L-------------------------------------------",
+    "##------------------L-------------------------------------------",
+    "##-----------------####-------###-------------------------------",
+    "##--------------------------------------------------------------",
+    "##-------------#----------###-----------------------------------",
+    "##-----------L#-------------------------###---------------------",
+    "##-----------L--------------------------------------------------",
+    "##------P----L--------------------------------------------------",
     "####################------###################---------##########",
     "####################------###################---------##########",
     "####################------###################---------##########",
@@ -47,11 +46,9 @@ LEVEL_MAP = [
 
 TILE_SIZE = 48
 
-
 # -------------- Helpers --------------
 def rect_from_grid(x, y, w=1, h=1):
     return pygame.Rect(x * TILE_SIZE, y * TILE_SIZE, w * TILE_SIZE, h * TILE_SIZE)
-
 
 # -------------- Game Objects --------------
 class Platform(pygame.sprite.Sprite):
@@ -67,39 +64,36 @@ class Platform(pygame.sprite.Sprite):
         else:
             pygame.draw.rect(surf, LADDER_COLOR, r, border_radius=6)
 
-# class Laddar(Platform):
-#     def __init__(self, rect: pygame.Rect):
-
-
 class Player(pygame.sprite.Sprite):
     def __init__(self, pos):
         super().__init__()
         self.rect = pygame.Rect(pos[0], pos[1], *PLAYER_SIZE)
         self.vel = pygame.Vector2(0, 0)
         self.on_ground = False
-        self.facing = 1  # 1 right, -1 left
+        self.facing = 1
         self.can_double_jump = False
         self.has_double_jump = True
         self.jump_was_pressed = False
         self.is_colliding_ladder = False
 
+        # Health
+        self.max_health = 100
+        self.health = self.max_health
+        self.last_y = pos[1]
+
     def update(self, dt, solids, input_dir, jump_pressed):
-
         self.is_colliding_ladder = False
-
-        probe = self.rect.inflate(6, 0)  # widen a bit
+        probe = self.rect.inflate(6, 0)
         self.is_colliding_ladder = any(
             getattr(s, "is_ladder", False) and probe.colliderect(s.rect) for s in solids
         )
 
-        # ---- Horizontal movement
+        # Horizontal movement
         target_speed = MOVE_SPEED * input_dir
+        if not self.is_colliding_ladder and not self.on_ground:
+            target_speed *= AIR_CONTROL
 
-        if not self.is_colliding_ladder:
-            if not self.on_ground:
-                target_speed *= AIR_CONTROL
-
-        accel = 5000.0  # quick responsive accel
+        accel = 5000.0
         if abs(target_speed - self.vel.x) < accel * dt:
             self.vel.x = target_speed
         else:
@@ -109,7 +103,7 @@ class Player(pygame.sprite.Sprite):
             self.facing = 1 if input_dir > 0 else -1
 
         if not self.is_colliding_ladder:
-            # ---- Jump (only on key press, no hold spam)
+            # Jump
             if jump_pressed and not self.jump_was_pressed:
                 if self.on_ground:
                     self.vel.y = JUMP_VELOCITY
@@ -119,12 +113,11 @@ class Player(pygame.sprite.Sprite):
                     self.vel.y = JUMP_VELOCITY
                     self.has_double_jump = False
 
-            # ---- Gravity
+            # Gravity
             self.vel.y += GRAVITY * dt
             if self.vel.y > MAX_FALL_SPEED:
                 self.vel.y = MAX_FALL_SPEED
 
-            # ---- Move & resolve collisions (separate axis)
             self.on_ground = False
 
         keys = pygame.key.get_pressed()
@@ -134,7 +127,7 @@ class Player(pygame.sprite.Sprite):
             else:
                 self.vel.y = 150
 
-        # X axis
+        # X axis collisions
         self.rect.x += round(self.vel.x * dt)
         for s in solids:
             if self.rect.colliderect(s.rect) and not s.is_ladder:
@@ -144,7 +137,7 @@ class Player(pygame.sprite.Sprite):
                     self.rect.left = s.rect.right
                 self.vel.x = 0
 
-        # Y axis
+        # Y axis collisions
         self.rect.y += round(self.vel.y * dt)
         for s in solids:
             if self.rect.colliderect(s.rect) and not s.is_ladder:
@@ -152,21 +145,34 @@ class Player(pygame.sprite.Sprite):
                     self.rect.bottom = s.rect.top
                     self.on_ground = True
                     self.vel.y = 0
-                    self.has_double_jump = True  # reset on landing
+                    self.has_double_jump = True
                 elif self.vel.y < 0:
                     self.rect.top = s.rect.bottom
                     self.vel.y = 0
 
-        # ---- Update key state (for edge detection)
+        # Fall damage (small, proportional)
+        if self.on_ground:
+            fall_distance = self.last_y - self.rect.y
+            if fall_distance < -300:  # fell more than 300 px
+                damage = int(abs(fall_distance) / 50)  # much smaller damage
+                self.health -= damage
+                if self.health < 0:
+                    self.health = 0
+            self.last_y = self.rect.y
+        else:
+            if self.vel.y > 0:
+                self.last_y = min(self.last_y, self.rect.y)
+
+        # Instant death if fallen into pit
+        if self.rect.top > len(LEVEL_MAP) * TILE_SIZE:
+            self.health = 0
+
         self.jump_was_pressed = jump_pressed
 
     def draw(self, surf, camera):
         r = self.rect.move(-camera.x, -camera.y)
-        # body
         pygame.draw.rect(surf, FG_COLOR, r, border_radius=8)
-        # face accent
-        eye_w = 6
-        eye_h = 8
+        eye_w, eye_h = 6, 8
         y = r.y + r.height // 3
         eye_x = r.centerx + (r.width // 4) * self.facing - (eye_w // 2)
         pygame.draw.rect(surf, ACCENT, (eye_x, y, eye_w, eye_h), border_radius=2)
@@ -178,17 +184,15 @@ class Powerup(pygame.sprite.Sprite):
 
     def draw(self, surf, camera):
         r = self.rect.move(-camera.x, -camera.y)
-        pygame.draw.ellipse(surf, (255, 200, 50), r)  # gold orb
+        pygame.draw.ellipse(surf, (147, 112, 219), r)
 
-
-# -------------- Level builder --------------
+# Level builder
 def build_level(level_map):
     solids = []
     powerups = []
     player_start = START_POS
     h = len(level_map)
     w = max(len(row) for row in level_map)
-
     for y in range(h):
         for x in range(len(level_map[y])):
             ch = level_map[y][x]
@@ -202,38 +206,28 @@ def build_level(level_map):
                 powerups.append(Powerup(rect_from_grid(x, y, 1, 1)))
     return solids, powerups, player_start
 
-
-# -------------- Camera --------------
+# Camera
 class Camera:
     def __init__(self):
         self.x = 0
         self.y = 0
 
     def update(self, target_rect):
-        # Smooth-follow camera (lerp)
         margin_x, margin_y = WIDTH * 0.35, HEIGHT * 0.4
-        target_x = target_rect.centerx - WIDTH // 2
-        target_y = target_rect.centery - HEIGHT // 2
-
-        # Keep player within soft margins to reduce camera jitter
         if target_rect.centerx - self.x < margin_x:
             self.x = target_rect.centerx - margin_x
         elif target_rect.centerx - self.x > WIDTH - margin_x:
             self.x = target_rect.centerx - (WIDTH - margin_x)
-
         if target_rect.centery - self.y < margin_y:
             self.y = target_rect.centery - margin_y
         elif target_rect.centery - self.y > HEIGHT - margin_y:
             self.y = target_rect.centery - (HEIGHT - margin_y)
-
-        # Clamp to world bounds (compute from level)
         world_w = max(len(row) for row in LEVEL_MAP) * TILE_SIZE
         world_h = len(LEVEL_MAP) * TILE_SIZE
         self.x = max(0, min(self.x, world_w - WIDTH))
         self.y = max(0, min(self.y, world_h - HEIGHT))
 
-
-# -------------- Main --------------
+# Main
 def main():
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -245,8 +239,6 @@ def main():
     powerup_group = pygame.sprite.Group(powerups)
     player = Player(start)
     camera = Camera()
-
-    # Turn platforms into a sprite group for easy iteration/draw
     solid_group = pygame.sprite.Group(solids)
 
     def reset():
@@ -255,11 +247,11 @@ def main():
 
     running = True
     while running:
-        dt = clock.tick(FPS) / 1000.0  # seconds
+        dt = clock.tick(FPS) / 1000.0
         jump_pressed = False
         input_dir = 0
 
-        # ---------- Events ----------
+        # Events
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -271,7 +263,6 @@ def main():
                 if event.key in (pygame.K_SPACE, pygame.K_w, pygame.K_UP):
                     jump_pressed = True
 
-        # Continuous input
         keys = pygame.key.get_pressed()
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
             input_dir -= 1
@@ -280,9 +271,8 @@ def main():
         if keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]:
             jump_pressed = True
 
-        # ---------- Update ----------
+        # Update
         player.update(dt, solid_group, input_dir, jump_pressed)
-        # Check powerup collisions
         for p in powerups[:]:
             if player.rect.colliderect(p.rect):
                 player.can_double_jump = True
@@ -290,24 +280,17 @@ def main():
                 powerup_group.remove(p)
         camera.update(player.rect)
 
-        # ---------- Draw ----------
+        # Draw
         screen.fill(BG_COLOR)
-
-        # Parallax-ish background stripes (cheap depth)
         stripe_h = 80
         for i in range(0, HEIGHT // stripe_h + 2):
             y = i * stripe_h - int(camera.y * 0.15) % stripe_h
             pygame.draw.rect(screen, (24, 24, 34), (0, y, WIDTH, stripe_h), border_radius=0)
 
-        # Platforms
         for s in solids:
             s.draw(screen, camera)
-
-        #Powerups
         for p in powerups:
             p.draw(screen, camera)
-
-        # Player
         player.draw(screen, camera)
 
         # UI
@@ -321,11 +304,21 @@ def main():
             text_surf = font.render(line, True, (200, 200, 210))
             screen.blit(text_surf, (ui_pad, ui_pad + i * 18))
 
+        # Health bar under Reset/Quit
+        bar_width = 200
+        bar_height = 20
+        bar_x = ui_pad
+        bar_y = ui_pad + len(info) * 18 + 5
+        pygame.draw.rect(screen, (100, 0, 0), (bar_x, bar_y, bar_width, bar_height))
+        health_ratio = player.health / player.max_health
+        pygame.draw.rect(screen, (255, 0, 0), (bar_x, bar_y, int(bar_width * health_ratio), bar_height))
+        pygame.draw.rect(screen, (255, 255, 255), (bar_x, bar_y, bar_width, bar_height), 2)
+
         pygame.display.flip()
 
     pygame.quit()
     sys.exit()
 
-
 if __name__ == "__main__":
     main()
+
