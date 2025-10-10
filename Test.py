@@ -7,10 +7,10 @@ TITLE = "Pygame Platformer Starter"
 FPS = 60
 
 # World physics
-GRAVITY = 2000.0  # px/s^2
-MOVE_SPEED = 300.0  # px/s
-AIR_CONTROL = 0.65  # fraction of MOVE_SPEED allowed while airborne
-JUMP_VELOCITY = -800.0  # px/s (negative goes up)
+GRAVITY = 2000.0          # px/s^2
+MOVE_SPEED = 300.0        # px/s
+AIR_CONTROL = 0.65        # fraction of MOVE_SPEED allowed while airborne
+JUMP_VELOCITY = -800.0    # px/s (negative goes up)
 MAX_FALL_SPEED = 2000.0
 
 # Player
@@ -28,20 +28,20 @@ ENEMY_SIZE = (36, 36)
 # -------------- Level data --------------
 # Use simple ASCII tiles: '#' = solid, 'P' = player start, '-' = empty, 'L' = ladder, '*' = powerup, 'E' = enemy, 'F' = shooting enemy
 LEVEL_MAP = [
-    "----------------------------------------------------------------",
-    "----------------------------------------------------------------",
-    "------------------*--------------------------------------------",
-    "-----------------###-------------------------------------------",
-    "--------------------L#------------------------------------------",
-    "--------------------L-------------------------------------------",
-    "--------------------L-------------------------------------------",
-    "--------------------L-------------------------------------------",
-    "-------------------####-------###-------------------------------",
-    "----------------------------------------------------------------",
-    "---------------#----E-----###-------------F---------------------",
-    "-------------L#-----------E-------------###---------------------",
-    "-------------L--------------------------------------------------",
-    "--------P----L------------E-----------E-------------------------",
+    "##--------------------------------------------------------------",
+    "##--------------------------------------------------------------",
+    "##----------------*--------------------------------------------",
+    "##---------------###-------------------------------------------",
+    "##------------------L#------------------------------------------",
+    "##------------------L-------------------------------------------",
+    "##------------------L-------------------------------------------",
+    "##------------------L-------------------------------------------",
+    "##-----------------####-------###-------------------------------",
+    "##--------------------------------------------------------------",
+    "##-------------#----------###-----------------------------------",
+    "##-----------L#-------------------------###---------------------",
+    "##-----------L--------------------------------------------------",
+    "##------P----L--------------------------------------------------",
     "####################------###################---------##########",
     "####################------###################---------##########",
     "####################------###################---------##########",
@@ -126,11 +126,16 @@ class Player(pygame.sprite.Sprite):
         self.rect = pygame.Rect(pos[0], pos[1], *PLAYER_SIZE)
         self.vel = pygame.Vector2(0, 0)
         self.on_ground = False
-        self.facing = 1  # 1 right, -1 left
+        self.facing = 1
         self.can_double_jump = False
         self.has_double_jump = True
         self.jump_was_pressed = False
         self.is_colliding_ladder = False
+
+        # Health
+        self.max_health = 100
+        self.health = self.max_health
+        self.last_y = pos[1]
 
     def update(self, dt, solids, input_dir, jump_pressed):
 
@@ -206,7 +211,23 @@ class Player(pygame.sprite.Sprite):
                     self.rect.top = s.rect.bottom
                     self.vel.y = 0
 
-        # ---- Update key state (for edge detection)
+        # Fall damage (small, proportional)
+        if self.on_ground:
+            fall_distance = self.last_y - self.rect.y
+            if fall_distance < -300:  # fell more than 300 px
+                damage = int(abs(fall_distance) / 50)  # much smaller damage
+                self.health -= damage
+                if self.health < 0:
+                    self.health = 0
+            self.last_y = self.rect.y
+        else:
+            if self.vel.y > 0:
+                self.last_y = min(self.last_y, self.rect.y)
+
+        # Instant death if fallen into pit
+        if self.rect.top > len(LEVEL_MAP) * TILE_SIZE:
+            self.health = 0
+
         self.jump_was_pressed = jump_pressed
 
     def draw(self, surf, camera):
@@ -220,7 +241,6 @@ class Player(pygame.sprite.Sprite):
         eye_x = r.centerx + (r.width // 4) * self.facing - (eye_w // 2)
         pygame.draw.rect(surf, ACCENT, (eye_x, y, eye_w, eye_h), border_radius=2)
 
-
 class Powerup(pygame.sprite.Sprite):
     def __init__(self, rect: pygame.Rect):
         super().__init__()
@@ -228,7 +248,7 @@ class Powerup(pygame.sprite.Sprite):
 
     def draw(self, surf, camera):
         r = self.rect.move(-camera.x, -camera.y)
-        pygame.draw.ellipse(surf, (255, 200, 50), r)  # gold orb
+        pygame.draw.ellipse(surf, (147, 112, 219), r)
 
 
 # -------------- Level builder --------------
@@ -427,6 +447,16 @@ def main():
         for i, line in enumerate(info):
             text_surf = font.render(line, True, (200, 200, 210))
             screen.blit(text_surf, (ui_pad, ui_pad + i * 18))
+
+        # Health bar under Reset/Quit
+        bar_width = 200
+        bar_height = 20
+        bar_x = ui_pad
+        bar_y = ui_pad + len(info) * 18 + 5
+        pygame.draw.rect(screen, (100, 0, 0), (bar_x, bar_y, bar_width, bar_height))
+        health_ratio = player.health / player.max_health
+        pygame.draw.rect(screen, (255, 0, 0), (bar_x, bar_y, int(bar_width * health_ratio), bar_height))
+        pygame.draw.rect(screen, (255, 255, 255), (bar_x, bar_y, bar_width, bar_height), 2)
 
         pygame.display.flip()
 
