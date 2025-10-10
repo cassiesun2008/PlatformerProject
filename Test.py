@@ -7,10 +7,10 @@ TITLE = "Pygame Platformer Starter"
 FPS = 60
 
 # World physics
-GRAVITY = 2000.0          # px/s^2
-MOVE_SPEED = 300.0        # px/s
-AIR_CONTROL = 0.65        # fraction of MOVE_SPEED allowed while airborne
-JUMP_VELOCITY = -800.0    # px/s (negative goes up)
+GRAVITY = 2000.0  # px/s^2
+MOVE_SPEED = 300.0  # px/s
+AIR_CONTROL = 0.65  # fraction of MOVE_SPEED allowed while airborne
+JUMP_VELOCITY = -800.0  # px/s (negative goes up)
 MAX_FALL_SPEED = 2000.0
 
 # Player
@@ -22,9 +22,11 @@ FG_COLOR = (230, 230, 230)
 ACCENT = (120, 180, 255)
 PLATFORM_COLOR = (70, 120, 160)
 LADDER_COLOR = (150, 75, 0)
+MONSTER_COLOR = (255, 50, 50)
+ENEMY_SIZE = (36, 36)
 
 # -------------- Level data --------------
-# Use simple ASCII tiles: '#' = solid, 'P' = player start, '-' = empty, 'L' = ladder, '*' = powerup
+# Use simple ASCII tiles: '#' = solid, 'P' = player start, '-' = empty, 'L' = ladder, '*' = powerup, 'E' = enemy, 'F' = shooting enemy
 LEVEL_MAP = [
     "----------------------------------------------------------------",
     "----------------------------------------------------------------",
@@ -36,10 +38,10 @@ LEVEL_MAP = [
     "--------------------L-------------------------------------------",
     "-------------------####-------###-------------------------------",
     "----------------------------------------------------------------",
-    "---------------#----------###-----------------------------------",
-    "-------------L#-------------------------###---------------------",
+    "---------------#----E-----###-------------F---------------------",
+    "-------------L#-----------E-------------###---------------------",
     "-------------L--------------------------------------------------",
-    "--------P----L--------------------------------------------------",
+    "--------P----L------------E-----------E-------------------------",
     "####################------###################---------##########",
     "####################------###################---------##########",
     "####################------###################---------##########",
@@ -67,8 +69,55 @@ class Platform(pygame.sprite.Sprite):
         else:
             pygame.draw.rect(surf, LADDER_COLOR, r, border_radius=6)
 
-# class Laddar(Platform):
-#     def __init__(self, rect: pygame.Rect):
+
+class Enemy(pygame.sprite.Sprite):
+    def __init__(self, pos):
+        super().__init__()
+        self.rect = pygame.Rect(pos[0], pos[1], *ENEMY_SIZE)
+
+    def draw(self, surf, camera):
+        r = self.rect.move(-camera.x, -camera.y)
+        pygame.draw.rect(surf, MONSTER_COLOR, r, border_radius=6)
+
+
+class ShootingEnemy(pygame.sprite.Sprite):
+    def __init__(self, pos, direction):
+        super().__init__()
+        self.rect = pygame.Rect(pos[0], pos[1], *ENEMY_SIZE)
+        self.direction = direction  # 1 for down-right, -1 for down-left
+        self.shoot_timer = 0
+        self.shoot_interval = 2.0  # shoot every 2 seconds
+
+    def update(self, dt, projectiles):
+        self.shoot_timer += dt
+        if self.shoot_timer >= self.shoot_interval:
+            self.shoot_timer = 0
+            # Create a new projectile
+            proj_x = self.rect.centerx
+            proj_y = self.rect.centery
+            projectiles.append(Projectile((proj_x, proj_y), self.direction))
+
+    def draw(self, surf, camera):
+        r = self.rect.move(-camera.x, -camera.y)
+        # Draw differently to distinguish from regular enemies
+        pygame.draw.rect(surf, (255, 150, 0), r, border_radius=6)
+
+
+class Projectile(pygame.sprite.Sprite):
+    def __init__(self, pos, direction):
+        super().__init__()
+        self.rect = pygame.Rect(pos[0], pos[1], 12, 12)
+        self.direction = direction
+        self.speed = 300  # pixels per second
+
+    def update(self, dt):
+        # Move diagonally (down and left/right based on direction)
+        self.rect.x += self.speed * self.direction * dt
+        self.rect.y += self.speed * dt  # always move down
+
+    def draw(self, surf, camera):
+        r = self.rect.move(-camera.x, -camera.y)
+        pygame.draw.circle(surf, (255, 100, 0), r.center, 6)
 
 
 class Player(pygame.sprite.Sprite):
@@ -171,6 +220,7 @@ class Player(pygame.sprite.Sprite):
         eye_x = r.centerx + (r.width // 4) * self.facing - (eye_w // 2)
         pygame.draw.rect(surf, ACCENT, (eye_x, y, eye_w, eye_h), border_radius=2)
 
+
 class Powerup(pygame.sprite.Sprite):
     def __init__(self, rect: pygame.Rect):
         super().__init__()
@@ -185,6 +235,8 @@ class Powerup(pygame.sprite.Sprite):
 def build_level(level_map):
     solids = []
     powerups = []
+    enemies = []
+    shooting_enemies = []
     player_start = START_POS
     h = len(level_map)
     w = max(len(row) for row in level_map)
@@ -200,7 +252,17 @@ def build_level(level_map):
                 solids.append(Platform(rect_from_grid(x, y), True))
             elif ch == '*':
                 powerups.append(Powerup(rect_from_grid(x, y, 1, 1)))
-    return solids, powerups, player_start
+            elif ch == 'E':
+                enemy_x = x * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[0]) // 2
+                enemy_y = y * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[1]) // 2
+                enemies.append(Enemy((enemy_x, enemy_y)))
+            elif ch == 'F':
+                enemy_x = x * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[0]) // 2
+                enemy_y = y * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[1]) // 2
+                # Determine direction based on position (right half shoots right, left half shoots left)
+                direction = 1 if x > len(level_map[y]) / 2 else -1
+                shooting_enemies.append(ShootingEnemy((enemy_x, enemy_y), direction))
+    return solids, powerups, enemies, shooting_enemies, player_start
 
 
 # -------------- Camera --------------
@@ -241,8 +303,11 @@ def main():
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("verdana", 16)
 
-    solids, powerups, start = build_level(LEVEL_MAP)
+    solids, powerups, enemies, shooting_enemies, start = build_level(LEVEL_MAP)
     powerup_group = pygame.sprite.Group(powerups)
+    enemy_group = pygame.sprite.Group(enemies)
+    shooting_enemy_group = pygame.sprite.Group(shooting_enemies)
+    projectiles = []
     player = Player(start)
     camera = Camera()
 
@@ -282,12 +347,42 @@ def main():
 
         # ---------- Update ----------
         player.update(dt, solid_group, input_dir, jump_pressed)
+
+        # Update shooting enemies and projectiles
+        for se in shooting_enemies:
+            se.update(dt, projectiles)
+
+        for proj in projectiles[:]:
+            proj.update(dt)
+            # Remove projectiles that are off screen
+            if proj.rect.y > HEIGHT + camera.y or proj.rect.x < -100 + camera.x or proj.rect.x > WIDTH + 100 + camera.x:
+                projectiles.remove(proj)
+
         # Check powerup collisions
         for p in powerups[:]:
             if player.rect.colliderect(p.rect):
                 player.can_double_jump = True
                 powerups.remove(p)
                 powerup_group.remove(p)
+
+        # Check enemy collisions
+        for enemy in enemies:
+            if player.rect.colliderect(enemy.rect):
+                reset()
+                break
+
+        # Check shooting enemy collisions
+        for se in shooting_enemies:
+            if player.rect.colliderect(se.rect):
+                reset()
+                break
+
+        # Check projectile collisions
+        for proj in projectiles:
+            if player.rect.colliderect(proj.rect):
+                reset()
+                break
+
         camera.update(player.rect)
 
         # ---------- Draw ----------
@@ -303,9 +398,21 @@ def main():
         for s in solids:
             s.draw(screen, camera)
 
-        #Powerups
+        # Powerups
         for p in powerups:
             p.draw(screen, camera)
+
+        # Enemies
+        for enemy in enemies:
+            enemy.draw(screen, camera)
+
+        # Shooting enemies
+        for se in shooting_enemies:
+            se.draw(screen, camera)
+
+        # Projectiles
+        for proj in projectiles:
+            proj.draw(screen, camera)
 
         # Player
         player.draw(screen, camera)
