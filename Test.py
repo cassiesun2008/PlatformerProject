@@ -7,14 +7,16 @@ TITLE = "Pygame Platformer Starter"
 FPS = 60
 
 # World physics
-GRAVITY = 2000.0          # px/s^2
-MOVE_SPEED = 300.0        # px/s
-AIR_CONTROL = 0.65        # fraction of MOVE_SPEED allowed while airborne
-JUMP_VELOCITY = -800.0    # px/s (negative goes up)
+GRAVITY = 2000.0  # px/s^2
+MOVE_SPEED = 300.0  # px/s
+AIR_CONTROL = 0.65  # fraction of MOVE_SPEED allowed while airborne
+JUMP_VELOCITY = -800.0  # px/s (negative goes up)
 MAX_FALL_SPEED = 2000.0
 
 # Player
 PLAYER_SIZE = (40, 56)
+PLAYER_SIZE_SMALL = (20, 28)
+SHRINK_DURATION = 5.0  # seconds
 START_POS = (96, 96)
 
 BG_COLOR = (28, 28, 40)
@@ -28,20 +30,20 @@ ENEMY_SIZE = (36, 36)
 # -------------- Level data --------------
 # Use simple ASCII tiles: '#' = solid, 'P' = player start, '-' = empty, 'L' = ladder, '*' = powerup, 'E' = enemy, 'F' = shooting enemy
 LEVEL_MAP = [
-    "##--------------------------------------------------------------",
-    "##--------------------------------------------------------------",
-    "##----------------*--------------------------------------------",
-    "##---------------###-------------------------------------------",
-    "##------------------L#------------------------------------------",
-    "##------------------L-------------------------------------------",
-    "##------------------L-------------------------------------------",
-    "##------------------L-------------------------------------------",
-    "##-----------------####-------###-------------------------------",
-    "##--------------------------------------------------------------",
-    "##-------------#----------###-----------------------------------",
-    "##-----------L#-------------------------###---------------------",
-    "##-----------L-----------------E----F---------------------------",
-    "##------P----L--------------------------------------------------",
+    "----------------------------------------------------------------",
+    "----------------------------------------------------------------",
+    "------------------*--------------------------------------------",
+    "-----------------###-------------------------------------------",
+    "--------------------L#------------------------------------------",
+    "--------------------L-------------------------------------------",
+    "--------------------L-------------------------------------------",
+    "--------------------L-------------------------------------------",
+    "-------------------####-------###-------------------------------",
+    "----------------------------------------------------------------",
+    "---------------#----E-----###-------------F---------------------",
+    "-------------L#-----------E-------------###---------------------",
+    "-------------L--------------------------------------------------",
+    "--------P----L------------E-----------E-------------------------",
     "####################------###################---------##########",
     "####################------###################---------##########",
     "####################------###################---------##########",
@@ -126,18 +128,35 @@ class Player(pygame.sprite.Sprite):
         self.rect = pygame.Rect(pos[0], pos[1], *PLAYER_SIZE)
         self.vel = pygame.Vector2(0, 0)
         self.on_ground = False
-        self.facing = 1
+        self.facing = 1  # 1 right, -1 left
         self.can_double_jump = False
         self.has_double_jump = True
         self.jump_was_pressed = False
         self.is_colliding_ladder = False
+        self.is_small = False
+        self.shrink_timer = 0
 
-        # Health
-        self.max_health = 100
-        self.health = self.max_health
-        self.last_y = pos[1]
+    def update(self, dt, solids, input_dir, jump_pressed, shrink_pressed):
+        # Handle shrinking
+        if shrink_pressed and not self.is_small:
+            # Activate shrink
+            old_bottom = self.rect.bottom
+            self.is_small = True
+            self.rect.width = PLAYER_SIZE_SMALL[0]
+            self.rect.height = PLAYER_SIZE_SMALL[1]
+            self.rect.bottom = old_bottom  # Keep feet in same position
+            self.shrink_timer = SHRINK_DURATION
 
-    def update(self, dt, solids, input_dir, jump_pressed):
+        # Update shrink timer
+        if self.is_small:
+            self.shrink_timer -= dt
+            if self.shrink_timer <= 0:
+                # Return to normal size
+                old_bottom = self.rect.bottom
+                self.is_small = False
+                self.rect.width = PLAYER_SIZE[0]
+                self.rect.height = PLAYER_SIZE[1]
+                self.rect.bottom = old_bottom
 
         self.is_colliding_ladder = False
 
@@ -211,35 +230,21 @@ class Player(pygame.sprite.Sprite):
                     self.rect.top = s.rect.bottom
                     self.vel.y = 0
 
-        # Fall damage (small, proportional)
-        if self.on_ground:
-            fall_distance = self.last_y - self.rect.y
-            if fall_distance < -300:  # fell more than 300 px
-                damage = int(abs(fall_distance) / 50)  # much smaller damage
-                self.health -= damage
-                if self.health < 0:
-                    self.health = 0
-            self.last_y = self.rect.y
-        else:
-            if self.vel.y > 0:
-                self.last_y = min(self.last_y, self.rect.y)
-
-        # Instant death if fallen into pit
-        if self.rect.top > len(LEVEL_MAP) * TILE_SIZE:
-            self.health = 0
-
+        # ---- Update key state (for edge detection)
         self.jump_was_pressed = jump_pressed
 
     def draw(self, surf, camera):
         r = self.rect.move(-camera.x, -camera.y)
         # body
-        pygame.draw.rect(surf, FG_COLOR, r, border_radius=8)
+        color = FG_COLOR if not self.is_small else (150, 220, 255)  # Blue tint when small
+        pygame.draw.rect(surf, color, r, border_radius=8)
         # face accent
-        eye_w = 6
-        eye_h = 8
+        eye_w = 6 if not self.is_small else 3
+        eye_h = 8 if not self.is_small else 4
         y = r.y + r.height // 3
         eye_x = r.centerx + (r.width // 4) * self.facing - (eye_w // 2)
         pygame.draw.rect(surf, ACCENT, (eye_x, y, eye_w, eye_h), border_radius=2)
+
 
 class Powerup(pygame.sprite.Sprite):
     def __init__(self, rect: pygame.Rect):
@@ -248,7 +253,7 @@ class Powerup(pygame.sprite.Sprite):
 
     def draw(self, surf, camera):
         r = self.rect.move(-camera.x, -camera.y)
-        pygame.draw.ellipse(surf, (147, 112, 219), r)
+        pygame.draw.ellipse(surf, (255, 200, 50), r)  # gold orb
 
 
 # -------------- Level builder --------------
@@ -342,6 +347,7 @@ def main():
     while running:
         dt = clock.tick(FPS) / 1000.0  # seconds
         jump_pressed = False
+        shrink_pressed = False
         input_dir = 0
 
         # ---------- Events ----------
@@ -355,6 +361,8 @@ def main():
                     reset()
                 if event.key in (pygame.K_SPACE, pygame.K_w, pygame.K_UP):
                     jump_pressed = True
+                if event.key == pygame.K_s:
+                    shrink_pressed = True
 
         # Continuous input
         keys = pygame.key.get_pressed()
@@ -364,9 +372,11 @@ def main():
             input_dir += 1
         if keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]:
             jump_pressed = True
+        if keys[pygame.K_s]:
+            shrink_pressed = True
 
         # ---------- Update ----------
-        player.update(dt, solid_group, input_dir, jump_pressed)
+        player.update(dt, solid_group, input_dir, jump_pressed, shrink_pressed)
 
         # Update shooting enemies and projectiles
         for se in shooting_enemies:
@@ -441,22 +451,14 @@ def main():
         ui_pad = 10
         info = [
             f"FPS: {clock.get_fps():.0f}",
-            "Move: ← → or A/D   Jump: Space/W/↑",
+            "Move: ← → or A/D   Jump: Space/W/↑   Shrink: S",
             "Reset: R   Quit: Esc or Q",
         ]
+        if player.is_small:
+            info.append(f"Small mode: {player.shrink_timer:.1f}s remaining")
         for i, line in enumerate(info):
             text_surf = font.render(line, True, (200, 200, 210))
             screen.blit(text_surf, (ui_pad, ui_pad + i * 18))
-
-        # Health bar under Reset/Quit
-        bar_width = 200
-        bar_height = 20
-        bar_x = ui_pad
-        bar_y = ui_pad + len(info) * 18 + 5
-        pygame.draw.rect(screen, (100, 0, 0), (bar_x, bar_y, bar_width, bar_height))
-        health_ratio = player.health / player.max_health
-        pygame.draw.rect(screen, (255, 0, 0), (bar_x, bar_y, int(bar_width * health_ratio), bar_height))
-        pygame.draw.rect(screen, (255, 255, 255), (bar_x, bar_y, bar_width, bar_height), 2)
 
         pygame.display.flip()
 
