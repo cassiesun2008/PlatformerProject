@@ -3,48 +3,50 @@ import sys
 
 # -------------- Config --------------
 WIDTH, HEIGHT = 960, 540
-TITLE = "Pygame Platformer Starter"
+TITLE = "Pygame Platformer - Health System"
 FPS = 60
 
 # World physics
-GRAVITY = 2000.0          # px/s^2
-MOVE_SPEED = 300.0        # px/s
-AIR_CONTROL = 0.65        # fraction of MOVE_SPEED allowed while airborne
-JUMP_VELOCITY = -800.0    # px/s (negative goes up)
+GRAVITY = 2000.0
+MOVE_SPEED = 300.0
+AIR_CONTROL = 0.65
+JUMP_VELOCITY = -800.0
 MAX_FALL_SPEED = 2000.0
 
 # Player
 PLAYER_SIZE = (40, 56)
 START_POS = (96, 96)
 
+# Colors
 BG_COLOR = (28, 28, 40)
 FG_COLOR = (230, 230, 230)
 ACCENT = (120, 180, 255)
 PLATFORM_COLOR = (70, 120, 160)
 LADDER_COLOR = (150, 75, 0)
-MONSTER_COLOR = (255, 50, 50)
+MONSTER_COLOR = (255, 50, 50)      # red enemy
+SHOOTER_COLOR = (255, 150, 0)      # orange enemy (shooting)
 ENEMY_SIZE = (36, 36)
+PROJECTILE_COLOR = (255, 100, 0)
+POWERUP_COLOR = (147, 112, 219)
 
 # -------------- Level data --------------
-# Use simple ASCII tiles: '#' = solid, 'P' = player start, '-' = empty, 'L' = ladder, '*' = powerup, 'E' = enemy, 'F' = shooting enemy
 LEVEL_MAP = [
     "##--------------------------------------------------------------",
-    "##--------------------------------------------------------------",
-    "##----------------*--------------------------------------------",
-    "##---------------###-------------------------------------------",
-    "##------------------L#------------------------------------------",
-    "##------------------L-------------------------------------------",
-    "##------------------L-------------------------------------------",
-    "##------------------L-------------------------------------------",
-    "##-----------------####-------###-------------------------------",
-    "##--------------------------------------------------------------",
-    "##-------------#----------###-----------------------------------",
-    "##-----------L#-------------------------###---------------------",
-    "##-----------L-----------------E----F---------------------------",
-    "##------P----L--------------------------------------------------",
-    "####################------###################---------##########",
-    "####################------###################---------##########",
-    "####################------###################---------##########",
+    "##--------------------------------------------------------------------------------------------------------------------",
+    "##----------------*---------------------------------------------------------------------------------------------------",
+    "##---------------###--------------------------------------------------------------------------------------------------",
+    "##------------------L#------------------------------------------------------------------------------------------------",
+    "##------------------L---------------###-------------------------------------------------------------------------------",
+    "##------------------L-------------------------------------------------------------------------------------------------",
+    "##------------------L---------------F---------------------------------------------------------------------------------",
+    "##-----------------####-------###---------------------###-------------------------------------------------------------",
+    "##----------------------------------------------------###-------------------------------------------------------------",
+    "##-----------L###---------###-------------------------###-----##------------------------------------------------------",
+    "##-----------L--------------------------###-----------###-------------------------------------------------------------",
+    "##-----------L-----------------E----F-----------------###-------------------------------------------------------------",
+    "##------P----L--------------------------------------------------------------------------------------------------------",
+    "####################------###################---######################################################################",
+    "####################------###################---######################################################################",
 ]
 
 TILE_SIZE = 48
@@ -57,50 +59,43 @@ def rect_from_grid(x, y, w=1, h=1):
 
 # -------------- Game Objects --------------
 class Platform(pygame.sprite.Sprite):
-    def __init__(self, rect: pygame.Rect, is_ladder=False):
+    def __init__(self, rect, is_ladder=False):
         super().__init__()
         self.rect = rect
         self.is_ladder = is_ladder
 
-    def draw(self, surf, camera):
-        r = self.rect.move(-camera.x, -camera.y)
-        if not self.is_ladder:
-            pygame.draw.rect(surf, PLATFORM_COLOR, r, border_radius=6)
-        else:
-            pygame.draw.rect(surf, LADDER_COLOR, r, border_radius=6)
+    def draw(self, surf, cam):
+        r = self.rect.move(-cam.x, -cam.y)
+        pygame.draw.rect(surf, LADDER_COLOR if self.is_ladder else PLATFORM_COLOR, r, border_radius=6)
 
 
 class Enemy(pygame.sprite.Sprite):
     def __init__(self, pos):
         super().__init__()
         self.rect = pygame.Rect(pos[0], pos[1], *ENEMY_SIZE)
+        self.color = MONSTER_COLOR
 
-    def draw(self, surf, camera):
-        r = self.rect.move(-camera.x, -camera.y)
-        pygame.draw.rect(surf, MONSTER_COLOR, r, border_radius=6)
+    def draw(self, surf, cam):
+        pygame.draw.rect(surf, self.color, self.rect.move(-cam.x, -cam.y), border_radius=6)
 
 
 class ShootingEnemy(pygame.sprite.Sprite):
     def __init__(self, pos, direction):
         super().__init__()
         self.rect = pygame.Rect(pos[0], pos[1], *ENEMY_SIZE)
-        self.direction = direction  # 1 for down-right, -1 for down-left
-        self.shoot_timer = 0
-        self.shoot_interval = 2.0  # shoot every 2 seconds
+        self.color = SHOOTER_COLOR
+        self.direction = direction
+        self.timer = 0
+        self.interval = 2.0  # seconds between shots
 
     def update(self, dt, projectiles):
-        self.shoot_timer += dt
-        if self.shoot_timer >= self.shoot_interval:
-            self.shoot_timer = 0
-            # Create a new projectile
-            proj_x = self.rect.centerx
-            proj_y = self.rect.centery
-            projectiles.append(Projectile((proj_x, proj_y), self.direction))
+        self.timer += dt
+        if self.timer >= self.interval:
+            self.timer = 0
+            projectiles.append(Projectile(self.rect.center, self.direction))
 
-    def draw(self, surf, camera):
-        r = self.rect.move(-camera.x, -camera.y)
-        # Draw differently to distinguish from regular enemies
-        pygame.draw.rect(surf, (255, 150, 0), r, border_radius=6)
+    def draw(self, surf, cam):
+        pygame.draw.rect(surf, self.color, self.rect.move(-cam.x, -cam.y), border_radius=6)
 
 
 class Projectile(pygame.sprite.Sprite):
@@ -108,16 +103,23 @@ class Projectile(pygame.sprite.Sprite):
         super().__init__()
         self.rect = pygame.Rect(pos[0], pos[1], 12, 12)
         self.direction = direction
-        self.speed = 300  # pixels per second
+        self.speed = 300
 
     def update(self, dt):
-        # Move diagonally (down and left/right based on direction)
         self.rect.x += self.speed * self.direction * dt
-        self.rect.y += self.speed * dt  # always move down
+        self.rect.y += self.speed * dt
 
-    def draw(self, surf, camera):
-        r = self.rect.move(-camera.x, -camera.y)
-        pygame.draw.circle(surf, (255, 100, 0), r.center, 6)
+    def draw(self, surf, cam):
+        pygame.draw.circle(surf, PROJECTILE_COLOR, self.rect.move(-cam.x, -cam.y).center, 6)
+
+
+class Powerup(pygame.sprite.Sprite):
+    def __init__(self, rect):
+        super().__init__()
+        self.rect = rect
+
+    def draw(self, surf, cam):
+        pygame.draw.ellipse(surf, POWERUP_COLOR, self.rect.move(-cam.x, -cam.y))
 
 
 class Player(pygame.sprite.Sprite):
@@ -128,32 +130,32 @@ class Player(pygame.sprite.Sprite):
         self.on_ground = False
         self.facing = 1
         self.can_double_jump = False
-        self.has_double_jump = True
+        self.has_double_jump = False
         self.jump_was_pressed = False
         self.is_colliding_ladder = False
 
         # Health
         self.max_health = 100
         self.health = self.max_health
-        self.last_y = pos[1]
+        self.invuln_timer = 0
 
     def update(self, dt, solids, input_dir, jump_pressed):
+        if self.invuln_timer > 0:
+            self.invuln_timer -= dt
 
-        self.is_colliding_ladder = False
-
-        probe = self.rect.inflate(6, 0)  # widen a bit
+        # Ladder detection
+        probe = self.rect.inflate(6, 0)
         self.is_colliding_ladder = any(
-            getattr(s, "is_ladder", False) and probe.colliderect(s.rect) for s in solids
+            getattr(s, "is_ladder", False) and probe.colliderect(s.rect)
+            for s in solids
         )
 
-        # ---- Horizontal movement
+        # Horizontal movement
         target_speed = MOVE_SPEED * input_dir
+        if not self.is_colliding_ladder and not self.on_ground:
+            target_speed *= AIR_CONTROL
 
-        if not self.is_colliding_ladder:
-            if not self.on_ground:
-                target_speed *= AIR_CONTROL
-
-        accel = 5000.0  # quick responsive accel
+        accel = 5000.0
         if abs(target_speed - self.vel.x) < accel * dt:
             self.vel.x = target_speed
         else:
@@ -162,8 +164,29 @@ class Player(pygame.sprite.Sprite):
         if input_dir != 0:
             self.facing = 1 if input_dir > 0 else -1
 
-        if not self.is_colliding_ladder:
-            # ---- Jump (only on key press, no hold spam)
+        # Jumping
+        keys = pygame.key.get_pressed()
+        on_ladder_input = keys[pygame.K_UP] or keys[pygame.K_w] or keys[pygame.K_DOWN] or keys[pygame.K_s]
+        if self.is_colliding_ladder:
+            ladder = next((s for s in solids if getattr(s, "is_ladder", False) and self.rect.colliderect(s.rect)), None)
+            if ladder:
+                lerp_factor = 0.2
+                self.rect.centerx += (ladder.rect.centerx - self.rect.centerx) * lerp_factor
+
+            if keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]:
+                self.vel.y = -150
+            elif keys[pygame.K_DOWN] or keys[pygame.K_s]:
+                self.vel.y = 150
+            else:
+                self.vel.y += GRAVITY * dt
+                self.vel.y = min(self.vel.y, MAX_FALL_SPEED)
+
+            if jump_pressed and not self.jump_was_pressed:
+                self.vel.y = JUMP_VELOCITY
+                self.on_ground = False
+                self.has_double_jump = self.can_double_jump
+                self.is_colliding_ladder = False
+        else:
             if jump_pressed and not self.jump_was_pressed:
                 if self.on_ground:
                     self.vel.y = JUMP_VELOCITY
@@ -172,147 +195,111 @@ class Player(pygame.sprite.Sprite):
                 elif self.has_double_jump:
                     self.vel.y = JUMP_VELOCITY
                     self.has_double_jump = False
-
-            # ---- Gravity
             self.vel.y += GRAVITY * dt
-            if self.vel.y > MAX_FALL_SPEED:
-                self.vel.y = MAX_FALL_SPEED
+            self.vel.y = min(self.vel.y, MAX_FALL_SPEED)
 
-            # ---- Move & resolve collisions (separate axis)
-            self.on_ground = False
-
-        keys = pygame.key.get_pressed()
-        if self.is_colliding_ladder:
-            if keys[pygame.K_UP]:
-                self.vel.y = -150
-            else:
-                self.vel.y = 150
-
-        # X axis
+        # Move X
         self.rect.x += round(self.vel.x * dt)
         for s in solids:
-            if self.rect.colliderect(s.rect) and not s.is_ladder:
+            if not s.is_ladder and self.rect.colliderect(s.rect):
                 if self.vel.x > 0:
                     self.rect.right = s.rect.left
                 elif self.vel.x < 0:
                     self.rect.left = s.rect.right
                 self.vel.x = 0
 
-        # Y axis
+        # Move Y
         self.rect.y += round(self.vel.y * dt)
+        self.on_ground = False
         for s in solids:
-            if self.rect.colliderect(s.rect) and not s.is_ladder:
+            if not s.is_ladder and self.rect.colliderect(s.rect):
                 if self.vel.y > 0:
                     self.rect.bottom = s.rect.top
-                    self.on_ground = True
                     self.vel.y = 0
-                    self.has_double_jump = True  # reset on landing
+                    self.on_ground = True
+                    self.has_double_jump = self.can_double_jump
                 elif self.vel.y < 0:
                     self.rect.top = s.rect.bottom
                     self.vel.y = 0
 
-        # Fall damage (small, proportional)
-        if self.on_ground:
-            fall_distance = self.last_y - self.rect.y
-            if fall_distance < -300:  # fell more than 300 px
-                damage = int(abs(fall_distance) / 50)  # much smaller damage
-                self.health -= damage
-                if self.health < 0:
-                    self.health = 0
-            self.last_y = self.rect.y
-        else:
-            if self.vel.y > 0:
-                self.last_y = min(self.last_y, self.rect.y)
-
-        # Instant death if fallen into pit
-        if self.rect.top > len(LEVEL_MAP) * TILE_SIZE:
-            self.health = 0
-
         self.jump_was_pressed = jump_pressed
 
-    def draw(self, surf, camera):
-        r = self.rect.move(-camera.x, -camera.y)
-        # body
-        pygame.draw.rect(surf, FG_COLOR, r, border_radius=8)
-        # face accent
-        eye_w = 6
-        eye_h = 8
-        y = r.y + r.height // 3
-        eye_x = r.centerx + (r.width // 4) * self.facing - (eye_w // 2)
-        pygame.draw.rect(surf, ACCENT, (eye_x, y, eye_w, eye_h), border_radius=2)
+    def take_damage(self, dmg, knockback):
+        if self.invuln_timer <= 0 and self.health > 0:
+            self.health = max(0, self.health - dmg)
+            self.vel = pygame.Vector2(knockback)
+            self.invuln_timer = 0.5
 
-class Powerup(pygame.sprite.Sprite):
-    def __init__(self, rect: pygame.Rect):
-        super().__init__()
-        self.rect = rect
+    def draw(self, surf, cam):
+        r = self.rect.move(-cam.x, -cam.y)
+        color = (200, 200, 200) if self.invuln_timer > 0 else FG_COLOR
+        pygame.draw.rect(surf, color, r, border_radius=8)
+        eye_x = r.centerx + (r.width // 4) * self.facing - 3
+        pygame.draw.rect(surf, ACCENT, (eye_x, r.y + r.height // 3, 6, 8), border_radius=2)
 
-    def draw(self, surf, camera):
-        r = self.rect.move(-camera.x, -camera.y)
-        pygame.draw.ellipse(surf, (147, 112, 219), r)
+        # Prevent leaving the level boundaries
+        # Prevent leaving level horizontally and top only
+        world_w = max(len(row) for row in LEVEL_MAP) * TILE_SIZE
+        world_h = len(LEVEL_MAP) * TILE_SIZE
 
+        # Clamp horizontally
+        if self.rect.left < 0:
+            self.rect.left = 0
+            self.vel.x = 0
+        if self.rect.right > world_w:
+            self.rect.right = world_w
+            self.vel.x = 0
 
-# -------------- Level builder --------------
-def build_level(level_map):
-    solids = []
-    powerups = []
-    enemies = []
-    shooting_enemies = []
-    player_start = START_POS
-    h = len(level_map)
-    w = max(len(row) for row in level_map)
+        # Clamp at the top
+        if self.rect.top < 0:
+            self.rect.top = 0
+            self.vel.y = 0
 
-    for y in range(h):
-        for x in range(len(level_map[y])):
-            ch = level_map[y][x]
-            if ch == '#':
-                solids.append(Platform(rect_from_grid(x, y)))
-            elif ch == 'P':
-                player_start = (x * TILE_SIZE, y * TILE_SIZE - (PLAYER_SIZE[1] - TILE_SIZE))
-            elif ch == 'L':
-                solids.append(Platform(rect_from_grid(x, y), True))
-            elif ch == '*':
-                powerups.append(Powerup(rect_from_grid(x, y, 1, 1)))
-            elif ch == 'E':
-                enemy_x = x * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[0]) // 2
-                enemy_y = y * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[1]) // 2
-                enemies.append(Enemy((enemy_x, enemy_y)))
-            elif ch == 'F':
-                enemy_x = x * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[0]) // 2
-                enemy_y = y * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[1]) // 2
-                # Determine direction based on position (right half shoots right, left half shoots left)
-                direction = 1 if x > len(level_map[y]) / 2 else -1
-                shooting_enemies.append(ShootingEnemy((enemy_x, enemy_y), direction))
-    return solids, powerups, enemies, shooting_enemies, player_start
+        # Allow falling off the bottom — instant health to 0
+        if self.rect.top > world_h:
+            self.health = 0
 
 
-# -------------- Camera --------------
 class Camera:
     def __init__(self):
         self.x = 0
         self.y = 0
 
     def update(self, target_rect):
-        # Smooth-follow camera (lerp)
         margin_x, margin_y = WIDTH * 0.35, HEIGHT * 0.4
-        target_x = target_rect.centerx - WIDTH // 2
-        target_y = target_rect.centery - HEIGHT // 2
-
-        # Keep player within soft margins to reduce camera jitter
         if target_rect.centerx - self.x < margin_x:
             self.x = target_rect.centerx - margin_x
         elif target_rect.centerx - self.x > WIDTH - margin_x:
             self.x = target_rect.centerx - (WIDTH - margin_x)
-
         if target_rect.centery - self.y < margin_y:
             self.y = target_rect.centery - margin_y
         elif target_rect.centery - self.y > HEIGHT - margin_y:
             self.y = target_rect.centery - (HEIGHT - margin_y)
-
-        # Clamp to world bounds (compute from level)
         world_w = max(len(row) for row in LEVEL_MAP) * TILE_SIZE
         world_h = len(LEVEL_MAP) * TILE_SIZE
         self.x = max(0, min(self.x, world_w - WIDTH))
         self.y = max(0, min(self.y, world_h - HEIGHT))
+
+
+def build_level():
+    solids, powerups, enemies, shooters = [], [], [], []
+    player_start = START_POS
+    for y, row in enumerate(LEVEL_MAP):
+        for x, ch in enumerate(row):
+            if ch == '#':
+                solids.append(Platform(rect_from_grid(x, y)))
+            elif ch == 'L':
+                solids.append(Platform(rect_from_grid(x, y), True))
+            elif ch == 'P':
+                player_start = (x * TILE_SIZE, y * TILE_SIZE - (PLAYER_SIZE[1] - TILE_SIZE))
+            elif ch == '*':
+                powerups.append(Powerup(rect_from_grid(x, y)))
+            elif ch == 'E':
+                enemies.append(Enemy((x * TILE_SIZE, y * TILE_SIZE)))
+            elif ch == 'F':
+                dir = 1 if x > len(row) / 2 else -1
+                shooters.append(ShootingEnemy((x * TILE_SIZE, y * TILE_SIZE), dir))
+    return solids, powerups, enemies, shooters, player_start
 
 
 # -------------- Main --------------
@@ -323,140 +310,109 @@ def main():
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("verdana", 16)
 
-    solids, powerups, enemies, shooting_enemies, start = build_level(LEVEL_MAP)
-    powerup_group = pygame.sprite.Group(powerups)
-    enemy_group = pygame.sprite.Group(enemies)
-    shooting_enemy_group = pygame.sprite.Group(shooting_enemies)
-    projectiles = []
-    player = Player(start)
-    camera = Camera()
-
-    # Turn platforms into a sprite group for easy iteration/draw
-    solid_group = pygame.sprite.Group(solids)
-
-    def reset():
-        nonlocal player
+    # reset_game rebuilds everything including powerups
+    def reset_game():
+        solids, powerups, enemies, shooters, start = build_level()
         player = Player(start)
+        projectiles = []
+        camera = Camera()
+        spawn_protect = 0.15  # short window after reset to avoid immediate pickup
+        return solids, powerups, enemies, shooters, player, projectiles, camera, spawn_protect
+
+    solids, powerups, enemies, shooters, player, projectiles, cam, spawn_protect = reset_game()
 
     running = True
     while running:
-        dt = clock.tick(FPS) / 1000.0  # seconds
-        jump_pressed = False
+        dt = clock.tick(FPS) / 1000.0
+        if spawn_protect > 0:
+            spawn_protect -= dt
+
+        jump = False
         input_dir = 0
 
-        # ---------- Events ----------
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT:
                 running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_ESCAPE, pygame.K_q):
+            elif e.type == pygame.KEYDOWN:
+                if e.key in (pygame.K_ESCAPE, pygame.K_q):
                     running = False
-                if event.key == pygame.K_r:
-                    reset()
-                if event.key in (pygame.K_SPACE, pygame.K_w, pygame.K_UP):
-                    jump_pressed = True
+                if e.key == pygame.K_r:
+                    solids, powerups, enemies, shooters, player, projectiles, cam, spawn_protect = reset_game()
+                if e.key in (pygame.K_SPACE, pygame.K_w, pygame.K_UP):
+                    jump = True
 
-        # Continuous input
         keys = pygame.key.get_pressed()
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
             input_dir -= 1
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
             input_dir += 1
         if keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]:
-            jump_pressed = True
+            jump = True
 
-        # ---------- Update ----------
-        player.update(dt, solid_group, input_dir, jump_pressed)
+        # Update player
+        player.update(dt, solids, input_dir, jump)
 
-        # Update shooting enemies and projectiles
-        for se in shooting_enemies:
-            se.update(dt, projectiles)
+        # Powerup pickup (only when spawn_protect elapsed)
+        if spawn_protect <= 0:
+            for p in powerups[:]:
+                if player.rect.colliderect(p.rect):
+                    player.can_double_jump = True
+                    powerups.remove(p)
+
+        # Enemies: melee (red)
+        for e in enemies:
+            if player.rect.colliderect(e.rect):
+                knock_dir = 1 if player.rect.centerx < e.rect.centerx else -1
+                player.take_damage(10, (-knock_dir * 300, -400))
+
+        # Shooting enemies + projectiles
+        for s in shooters:
+            s.update(dt, projectiles)
+            if player.rect.colliderect(s.rect):
+                knock_dir = 1 if player.rect.centerx < s.rect.centerx else -1
+                player.take_damage(10, (-knock_dir * 300, -400))
 
         for proj in projectiles[:]:
             proj.update(dt)
-            # Remove projectiles that are off screen
-            if proj.rect.y > HEIGHT + camera.y or proj.rect.x < -100 + camera.x or proj.rect.x > WIDTH + 100 + camera.x:
+            if proj.rect.colliderect(player.rect):
+                player.take_damage(10, (300 if proj.direction < 0 else -300, -400))
+                projectiles.remove(proj)
+            elif proj.rect.y > HEIGHT + cam.y:
                 projectiles.remove(proj)
 
-        # Check powerup collisions
-        for p in powerups[:]:
-            if player.rect.colliderect(p.rect):
-                player.can_double_jump = True
-                powerups.remove(p)
-                powerup_group.remove(p)
+        cam.update(player.rect)
 
-        # Check enemy collisions
-        for enemy in enemies:
-            if player.rect.colliderect(enemy.rect):
-                reset()
-                break
-
-        # Check shooting enemy collisions
-        for se in shooting_enemies:
-            if player.rect.colliderect(se.rect):
-                reset()
-                break
-
-        # Check projectile collisions
-        for proj in projectiles:
-            if player.rect.colliderect(proj.rect):
-                reset()
-                break
-
-        camera.update(player.rect)
-
-        # ---------- Draw ----------
+        # --- Draw ---
         screen.fill(BG_COLOR)
-
-        # Parallax-ish background stripes (cheap depth)
-        stripe_h = 80
-        for i in range(0, HEIGHT // stripe_h + 2):
-            y = i * stripe_h - int(camera.y * 0.15) % stripe_h
-            pygame.draw.rect(screen, (24, 24, 34), (0, y, WIDTH, stripe_h), border_radius=0)
-
-        # Platforms
         for s in solids:
-            s.draw(screen, camera)
-
-        # Powerups
-        for p in powerups:
-            p.draw(screen, camera)
-
-        # Enemies
-        for enemy in enemies:
-            enemy.draw(screen, camera)
-
-        # Shooting enemies
-        for se in shooting_enemies:
-            se.draw(screen, camera)
-
-        # Projectiles
+            s.draw(screen, cam)
+        for e in enemies:
+            e.draw(screen, cam)
+        for s in shooters:
+            s.draw(screen, cam)
         for proj in projectiles:
-            proj.draw(screen, camera)
+            proj.draw(screen, cam)
+        for p in powerups:
+            p.draw(screen, cam)
+        player.draw(screen, cam)
 
-        # Player
-        player.draw(screen, camera)
-
-        # UI
-        ui_pad = 10
+        # --- UI ---
+        pad = 10
         info = [
             f"FPS: {clock.get_fps():.0f}",
             "Move: ← → or A/D   Jump: Space/W/↑",
             "Reset: R   Quit: Esc or Q",
         ]
         for i, line in enumerate(info):
-            text_surf = font.render(line, True, (200, 200, 210))
-            screen.blit(text_surf, (ui_pad, ui_pad + i * 18))
+            screen.blit(font.render(line, True, (200, 200, 210)), (pad, pad + i * 18))
 
-        # Health bar under Reset/Quit
-        bar_width = 200
-        bar_height = 20
-        bar_x = ui_pad
-        bar_y = ui_pad + len(info) * 18 + 5
-        pygame.draw.rect(screen, (100, 0, 0), (bar_x, bar_y, bar_width, bar_height))
-        health_ratio = player.health / player.max_health
-        pygame.draw.rect(screen, (255, 0, 0), (bar_x, bar_y, int(bar_width * health_ratio), bar_height))
-        pygame.draw.rect(screen, (255, 255, 255), (bar_x, bar_y, bar_width, bar_height), 2)
+        # Health bar
+        bar_w, bar_h = 200, 20
+        bx, by = pad, pad + len(info) * 18 + 5
+        pygame.draw.rect(screen, (100, 0, 0), (bx, by, bar_w, bar_h))
+        ratio = player.health / player.max_health
+        pygame.draw.rect(screen, (255, 0, 0), (bx, by, int(bar_w * ratio), bar_h))
+        pygame.draw.rect(screen, (255, 255, 255), (bx, by, bar_w, bar_h), 2)
 
         pygame.display.flip()
 
