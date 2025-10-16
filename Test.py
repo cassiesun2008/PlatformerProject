@@ -7,10 +7,10 @@ TITLE = "Pygame Platformer Starter"
 FPS = 60
 
 # World physics
-GRAVITY = 2000.0          # px/s^2
-MOVE_SPEED = 300.0        # px/s
-AIR_CONTROL = 0.65        # fraction of MOVE_SPEED allowed while airborne
-JUMP_VELOCITY = -800.0    # px/s (negative goes up)
+GRAVITY = 2000.0  # px/s^2
+MOVE_SPEED = 300.0  # px/s
+AIR_CONTROL = 0.65  # fraction of MOVE_SPEED allowed while airborne
+JUMP_VELOCITY = -800.0  # px/s (negative goes up)
 MAX_FALL_SPEED = 2000.0
 
 # Player
@@ -77,7 +77,6 @@ class Enemy(pygame.sprite.Sprite):
     def __init__(self, pos):
         super().__init__()
         self.rect = pygame.Rect(pos[0], pos[1], *ENEMY_SIZE)
-        self.color = MONSTER_COLOR
 
     def draw(self, surf, camera):
         r = self.rect.move(-camera.x, -camera.y)
@@ -103,7 +102,6 @@ class ShootingEnemy(pygame.sprite.Sprite):
 
     def draw(self, surf, camera):
         r = self.rect.move(-camera.x, -camera.y)
-        # Draw differently to distinguish from regular enemies
         pygame.draw.rect(surf, (255, 150, 0), r, border_radius=6)
 
 
@@ -119,14 +117,19 @@ class Projectile(pygame.sprite.Sprite):
         self.rect.x += self.speed * self.direction * dt
         self.rect.y += self.speed * dt  # always move down
 
+    def draw(self, surf, camera):
+        r = self.rect.move(-camera.x, -camera.y)
+        pygame.draw.circle(surf, PROJECTILE_COLOR, r.center, 6)
+
 
 class Powerup(pygame.sprite.Sprite):
     def __init__(self, rect):
         super().__init__()
         self.rect = rect
 
-    def draw(self, surf, cam):
-        pygame.draw.ellipse(surf, POWERUP_COLOR, self.rect.move(-cam.x, -cam.y))
+    def draw(self, surf, camera):
+        r = self.rect.move(-camera.x, -camera.y)
+        pygame.draw.ellipse(surf, POWERUP_COLOR, r)
 
 
 class Player(pygame.sprite.Sprite):
@@ -142,6 +145,7 @@ class Player(pygame.sprite.Sprite):
         self.is_colliding_ladder = False
         self.is_small = False
         self.shrink_timer = 0
+        self.last_y = pos[1]
 
         # Health
         self.max_health = 100
@@ -152,20 +156,19 @@ class Player(pygame.sprite.Sprite):
         if self.invuln_timer > 0:
             self.invuln_timer -= dt
 
+        # Handle shrinking
         if shrink_pressed and not self.is_small:
-            # Activate shrink
             old_bottom = self.rect.bottom
             self.is_small = True
             self.rect.width = PLAYER_SIZE_SMALL[0]
             self.rect.height = PLAYER_SIZE_SMALL[1]
-            self.rect.bottom = old_bottom  # Keep feet in same position
+            self.rect.bottom = old_bottom
             self.shrink_timer = SHRINK_DURATION
 
         # Update shrink timer
         if self.is_small:
             self.shrink_timer -= dt
             if self.shrink_timer <= 0:
-                # Return to normal size
                 old_bottom = self.rect.bottom
                 self.is_small = False
                 self.rect.width = PLAYER_SIZE[0]
@@ -173,8 +176,7 @@ class Player(pygame.sprite.Sprite):
                 self.rect.bottom = old_bottom
 
         self.is_colliding_ladder = False
-
-        probe = self.rect.inflate(6, 0)  # widen a bit
+        probe = self.rect.inflate(6, 0)
         self.is_colliding_ladder = any(
             getattr(s, "is_ladder", False) and probe.colliderect(s.rect) for s in solids
         )
@@ -186,7 +188,7 @@ class Player(pygame.sprite.Sprite):
             if not self.on_ground:
                 target_speed *= AIR_CONTROL
 
-        accel = 5000.0  # quick responsive accel
+        accel = 5000.0
         if abs(target_speed - self.vel.x) < accel * dt:
             self.vel.x = target_speed
         else:
@@ -195,29 +197,30 @@ class Player(pygame.sprite.Sprite):
         if input_dir != 0:
             self.facing = 1 if input_dir > 0 else -1
 
-        # Jumping
+        # ---- Ladder climbing
         keys = pygame.key.get_pressed()
-        on_ladder_input = keys[pygame.K_UP] or keys[pygame.K_w] or keys[pygame.K_DOWN] or keys[pygame.K_s]
         if self.is_colliding_ladder:
+            # Center player on ladder
             ladder = next((s for s in solids if getattr(s, "is_ladder", False) and self.rect.colliderect(s.rect)), None)
             if ladder:
                 lerp_factor = 0.2
                 self.rect.centerx += (ladder.rect.centerx - self.rect.centerx) * lerp_factor
 
-            if keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]:
+            # Ladder movement
+            if keys[pygame.K_UP] or keys[pygame.K_w]:
                 self.vel.y = -150
             elif keys[pygame.K_DOWN] or keys[pygame.K_s]:
                 self.vel.y = 150
             else:
-                self.vel.y += GRAVITY * dt
-                self.vel.y = min(self.vel.y, MAX_FALL_SPEED)
+                self.vel.y = 150  # Default slow fall on ladder
 
+            # Can jump off ladder
             if jump_pressed and not self.jump_was_pressed:
                 self.vel.y = JUMP_VELOCITY
                 self.on_ground = False
                 self.has_double_jump = self.can_double_jump
-                self.is_colliding_ladder = False
         else:
+            # ---- Normal jump
             if jump_pressed and not self.jump_was_pressed:
                 if self.on_ground:
                     self.vel.y = JUMP_VELOCITY
@@ -229,14 +232,11 @@ class Player(pygame.sprite.Sprite):
 
             # ---- Gravity
             self.vel.y += GRAVITY * dt
-            self.vel.y = min(self.vel.y, MAX_FALL_SPEED)
+            if self.vel.y > MAX_FALL_SPEED:
+                self.vel.y = MAX_FALL_SPEED
 
-        keys = pygame.key.get_pressed()
-        if self.is_colliding_ladder:
-            if keys[pygame.K_UP]:
-                self.vel.y = -150
-            else:
-                self.vel.y = 150
+        # ---- Move & resolve collisions
+        self.on_ground = False
 
         # X axis
         self.rect.x += round(self.vel.x * dt)
@@ -256,26 +256,37 @@ class Player(pygame.sprite.Sprite):
                     self.rect.bottom = s.rect.top
                     self.on_ground = True
                     self.vel.y = 0
-                    self.has_double_jump = True  # reset on landing
+                    self.has_double_jump = self.can_double_jump  # reset on landing
                 elif self.vel.y < 0:
                     self.rect.top = s.rect.bottom
                     self.vel.y = 0
 
-        # Fall damage (small, proportional)
-        if self.on_ground:
-            fall_distance = self.last_y - self.rect.y
-            if fall_distance < -300:  # fell more than 300 px
-                damage = int(abs(fall_distance) / 50)  # much smaller damage
-                self.health -= damage
-                if self.health < 0:
-                    self.health = 0
+        # Fall damage
+        if self.on_ground and self.vel.y >= 0:
+            fall_distance = self.rect.y - self.last_y
+            if fall_distance > 300:  # fell more than 300 px
+                damage = int(fall_distance / 50)
+                self.health = max(0, self.health - damage)
             self.last_y = self.rect.y
-        else:
-            if self.vel.y > 0:
-                self.last_y = min(self.last_y, self.rect.y)
+        elif self.vel.y > 0:
+            self.last_y = max(self.last_y, self.rect.y)
+
+        # Boundary clamping
+        world_w = max(len(row) for row in LEVEL_MAP) * TILE_SIZE
+        world_h = len(LEVEL_MAP) * TILE_SIZE
+
+        if self.rect.left < 0:
+            self.rect.left = 0
+            self.vel.x = 0
+        if self.rect.right > world_w:
+            self.rect.right = world_w
+            self.vel.x = 0
+        if self.rect.top < 0:
+            self.rect.top = 0
+            self.vel.y = 0
 
         # Instant death if fallen into pit
-        if self.rect.top > len(LEVEL_MAP) * TILE_SIZE:
+        if self.rect.top > world_h:
             self.health = 0
 
         self.jump_was_pressed = jump_pressed
@@ -286,10 +297,14 @@ class Player(pygame.sprite.Sprite):
             self.vel = pygame.Vector2(knockback)
             self.invuln_timer = 0.5
 
-    def draw(self, surf, cam):
-        r = self.rect.move(-cam.x, -cam.y)
+    def draw(self, surf, camera):
+        r = self.rect.move(-camera.x, -camera.y)
+        # Flicker during invulnerability
+        if self.invuln_timer > 0 and int(self.invuln_timer * 20) % 2 == 0:
+            return  # Don't draw (flicker effect)
+
         # body
-        color = FG_COLOR if not self.is_small else (150, 220, 255)  # Blue tint when small
+        color = FG_COLOR if not self.is_small else (150, 220, 255)
         pygame.draw.rect(surf, color, r, border_radius=8)
         # face accent
         eye_w = 6 if not self.is_small else 3
@@ -298,36 +313,6 @@ class Player(pygame.sprite.Sprite):
         eye_x = r.centerx + (r.width // 4) * self.facing - (eye_w // 2)
         pygame.draw.rect(surf, ACCENT, (eye_x, y, eye_w, eye_h), border_radius=2)
 
-        # Prevent leaving the level boundaries
-        # Prevent leaving level horizontally and top only
-        world_w = max(len(row) for row in LEVEL_MAP) * TILE_SIZE
-        world_h = len(LEVEL_MAP) * TILE_SIZE
-
-        # Clamp horizontally
-        if self.rect.left < 0:
-            self.rect.left = 0
-            self.vel.x = 0
-        if self.rect.right > world_w:
-            self.rect.right = world_w
-            self.vel.x = 0
-
-        # Clamp at the top
-        if self.rect.top < 0:
-            self.rect.top = 0
-            self.vel.y = 0
-
-        # Allow falling off the bottom — instant health to 0
-        if self.rect.top > world_h:
-            self.health = 0
-
-class Powerup(pygame.sprite.Sprite):
-    def __init__(self, rect: pygame.Rect):
-        super().__init__()
-        self.rect = rect
-
-    def draw(self, surf, camera):
-        r = self.rect.move(-camera.x, -camera.y)
-        pygame.draw.ellipse(surf, (255, 200, 50), r)  # gold orb
 
 # -------------- Camera --------------
 class Camera:
@@ -336,12 +321,8 @@ class Camera:
         self.y = 0
 
     def update(self, target_rect):
-        # Smooth-follow camera (lerp)
         margin_x, margin_y = WIDTH * 0.35, HEIGHT * 0.4
-        target_x = target_rect.centerx - WIDTH // 2
-        target_y = target_rect.centery - HEIGHT // 2
 
-        # Keep player within soft margins to reduce camera jitter
         if target_rect.centerx - self.x < margin_x:
             self.x = target_rect.centerx - margin_x
         elif target_rect.centerx - self.x > WIDTH - margin_x:
@@ -352,7 +333,6 @@ class Camera:
         elif target_rect.centery - self.y > HEIGHT - margin_y:
             self.y = target_rect.centery - (HEIGHT - margin_y)
 
-        # Clamp to world bounds (compute from level)
         world_w = max(len(row) for row in LEVEL_MAP) * TILE_SIZE
         world_h = len(LEVEL_MAP) * TILE_SIZE
         self.x = max(0, min(self.x, world_w - WIDTH))
@@ -373,10 +353,14 @@ def build_level():
             elif ch == '*':
                 powerups.append(Powerup(rect_from_grid(x, y)))
             elif ch == 'E':
-                enemies.append(Enemy((x * TILE_SIZE, y * TILE_SIZE)))
+                enemy_x = x * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[0]) // 2
+                enemy_y = y * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[1]) // 2
+                enemies.append(Enemy((enemy_x, enemy_y)))
             elif ch == 'F':
+                enemy_x = x * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[0]) // 2
+                enemy_y = y * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[1]) // 2
                 dir = 1 if x > len(row) / 2 else -1
-                shooters.append(ShootingEnemy((x * TILE_SIZE, y * TILE_SIZE), dir))
+                shooters.append(ShootingEnemy((enemy_x, enemy_y), dir))
     return solids, powerups, enemies, shooters, player_start
 
 
@@ -388,16 +372,15 @@ def main():
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("verdana", 16)
 
-    # reset_game rebuilds everything including powerups
     def reset_game():
         solids, powerups, enemies, shooters, start = build_level()
         player = Player(start)
         projectiles = []
         camera = Camera()
-        spawn_protect = 0.15  # short window after reset to avoid immediate pickup
+        spawn_protect = 0.15
         return solids, powerups, enemies, shooters, player, projectiles, camera, spawn_protect
 
-    solids, powerups, enemies, shooters, player, projectiles, cam, spawn_protect = reset_game()
+    solids, powerups, enemies, shooters, player, projectiles, camera, spawn_protect = reset_game()
 
     running = True
     while running:
@@ -405,7 +388,8 @@ def main():
         if spawn_protect > 0:
             spawn_protect -= dt
 
-        jump = False
+        jump_pressed = False
+        shrink_pressed = False
         input_dir = 0
 
         for e in pygame.event.get():
@@ -415,11 +399,9 @@ def main():
                 if e.key in (pygame.K_ESCAPE, pygame.K_q):
                     running = False
                 if e.key == pygame.K_r:
-                    solids, powerups, enemies, shooters, player, projectiles, cam, spawn_protect = reset_game()
+                    solids, powerups, enemies, shooters, player, projectiles, camera, spawn_protect = reset_game()
                 if e.key in (pygame.K_SPACE, pygame.K_w, pygame.K_UP):
-                    jump = True
-                if e.key == pygame.K_s:
-                    shrink_pressed = True
+                    jump_pressed = True
 
         # Continuous input
         keys = pygame.key.get_pressed()
@@ -428,19 +410,21 @@ def main():
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
             input_dir += 1
         if keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]:
-            jump = True
+            jump_pressed = True
+        if keys[pygame.K_s] or keys[pygame.K_DOWN]:
+            shrink_pressed = True
 
         # Update player
-        player.update(dt, solids, input_dir, jump)
+        player.update(dt, solids, input_dir, jump_pressed, shrink_pressed)
 
-        # Powerup pickup (only when spawn_protect elapsed)
+        # Powerup pickup
         if spawn_protect <= 0:
             for p in powerups[:]:
                 if player.rect.colliderect(p.rect):
                     player.can_double_jump = True
                     powerups.remove(p)
 
-        # Enemies: melee (red)
+        # Enemies
         for e in enemies:
             if player.rect.colliderect(e.rect):
                 knock_dir = 1 if player.rect.centerx < e.rect.centerx else -1
@@ -458,32 +442,46 @@ def main():
             if proj.rect.colliderect(player.rect):
                 player.take_damage(10, (300 if proj.direction < 0 else -300, -400))
                 projectiles.remove(proj)
-            elif proj.rect.y > HEIGHT + cam.y:
+            elif proj.rect.y > HEIGHT + camera.y:
                 projectiles.remove(proj)
 
-        cam.update(player.rect)
+        camera.update(player.rect)
+
+        # Check for death
+        if player.health <= 0:
+            solids, powerups, enemies, shooters, player, projectiles, camera, spawn_protect = reset_game()
 
         # ---------- Draw ----------
         screen.fill(BG_COLOR)
+
+        # Parallax background
+        stripe_h = 80
+        for i in range(0, HEIGHT // stripe_h + 2):
+            y = i * stripe_h - int(camera.y * 0.15) % stripe_h
+            pygame.draw.rect(screen, (24, 24, 34), (0, y, WIDTH, stripe_h))
+
         for s in solids:
-            s.draw(screen, cam)
-        for e in enemies:
-            e.draw(screen, cam)
-        for s in shooters:
-            s.draw(screen, cam)
-        for proj in projectiles:
-            proj.draw(screen, cam)
+            s.draw(screen, camera)
         for p in powerups:
-            p.draw(screen, cam)
-        player.draw(screen, cam)
+            p.draw(screen, camera)
+        for e in enemies:
+            e.draw(screen, camera)
+        for s in shooters:
+            s.draw(screen, camera)
+        for proj in projectiles:
+            proj.draw(screen, camera)
+        player.draw(screen, camera)
 
         # --- UI ---
         pad = 10
         info = [
             f"FPS: {clock.get_fps():.0f}",
-            "Move: ← → or A/D   Jump: Space/W/↑",
+            "Move: ← → or A/D   Jump: Space/W/↑   Shrink: S/↓",
             "Reset: R   Quit: Esc or Q",
         ]
+        if player.is_small:
+            info.append(f"Small mode: {player.shrink_timer:.1f}s remaining")
+
         for i, line in enumerate(info):
             screen.blit(font.render(line, True, (200, 200, 210)), (pad, pad + i * 18))
 
