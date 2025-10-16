@@ -287,7 +287,7 @@ class Player(pygame.sprite.Sprite):
             self.invuln_timer = 0.5
 
     def draw(self, surf, cam):
-        r = self.rect.move(-camera.x, -camera.y)
+        r = self.rect.move(-cam.x, -cam.y)
         # body
         color = FG_COLOR if not self.is_small else (150, 220, 255)  # Blue tint when small
         pygame.draw.rect(surf, color, r, border_radius=8)
