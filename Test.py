@@ -209,8 +209,6 @@ class Player(pygame.sprite.Sprite):
             # Ladder movement
             if keys[pygame.K_UP] or keys[pygame.K_w]:
                 self.vel.y = -150
-            elif keys[pygame.K_DOWN] or keys[pygame.K_s]:
-                self.vel.y = 150
             else:
                 self.vel.y = 150  # Default slow fall on ladder
 
