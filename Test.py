@@ -31,22 +31,24 @@ POWERUP_COLOR = (147, 112, 219)
 
 # -------------- Level data --------------
 LEVEL_MAP = [
-    "##--------------------------------------------------------------",
-    "##--------------------------------------------------------------------------------------------------------------------",
-    "##----------------*---------------------------------------------------------------------------------------------------",
-    "##---------------###--------------------------------------------------------------------------------------------------",
-    "##------------------L#------------------------------------------------------------------------------------------------",
-    "##------------------L---------------###-------------------------------------------------------------------------------",
-    "##------------------L-------------------------------------------------------------------------------------------------",
-    "##------------------L---------------F---------------------------------------------------------------------------------",
-    "##-----------------####-------###---------------------###-------------------------------------------------------------",
-    "##----------------------------------------------------###-------------------------------------------------------------",
-    "##-----------L###---------###-------------------------###-----##------------------------------------------------------",
-    "##-----------L--------------------------###-----------###-------------------------------------------------------------",
-    "##-----------L-----------------E----F-----------------###-------------------------------------------------------------",
-    "##------P----L--------------------------------------------------^^----------------------------------------------------",
-    "####################------###################---######################################################################",
-    "####################------###################---######################################################################",
+    "######################################################################################################################",
+    "######################################################################################################################",
+    "##----------------------------------------------------###-----------------------------------------------------------##",
+    "##----------------------------------------------------###-----------------------------------------------------------##",
+    "##----------------J---#--------------S----------------###-----------------------------------------------------------##",
+    "##----------#L######L##-------------###---------------###-----------------------------------------------------------##",
+    "##----------#L------L##-------------------------------###-----------------------------------------------------------##",
+    "##----------#L------L##----------------F--------------###-----------------------------------------------------------##",
+    "##----------#L------L---------------------------------###-----------------------------------------------------------##",
+    "##----------#L------L---------------F-----------------###-----------------------------------------------------------##",
+    "##----------#L-----####-------###--------------------F###-----------------------------------------------------------##",
+    "##-----------L#--------------------------------------F###-----------------------------------------------------------##",
+    "##-----------L#-----------###------------------------F###-----##----------------------------------------------------##",
+    "##-----------L#-------------------------###-----------###--F----------F----EEEEEEE--------F-------------------------##",
+    "##-----------L-----------------E----F-----------------###------------------#######----------------------------------##",
+    "##------P----L--^^^-------------------------------------------^^^^--------------------------------------------------##",
+    "####################------###################------###################################################################",
+    "####################------###################------###################################################################",
 ]
 
 TILE_SIZE = 48
@@ -79,8 +81,28 @@ class Spike(pygame.sprite.Sprite):
 
     def draw(self, surf, camera):
         r = self.rect.move(-camera.x, -camera.y)
-        points = [(r.left, r.bottom), (r.centerx, r.top), (r.right, r.bottom)]
-        pygame.draw.polygon(surf, (255, 255, 100), points)
+
+        # first spike (left)
+        points1 = [
+            (r.left, r.bottom),
+            (r.centerx, r.top),
+            (r.right, r.bottom)
+        ]
+
+        # second spike (right), shifted horizontally
+        offset = r.width  # distance between spikes
+        points2 = [
+            (r.left + offset, r.bottom),
+            (r.centerx + offset, r.top),
+            (r.right + offset, r.bottom)
+        ]
+
+        # draw both
+        pygame.draw.polygon(surf, (255, 255, 100), points1)
+        pygame.draw.polygon(surf, (255, 255, 100), points2)
+
+
+
 
 
 class Enemy(pygame.sprite.Sprite):
@@ -131,13 +153,19 @@ class Projectile(pygame.sprite.Sprite):
 
 
 class Powerup(pygame.sprite.Sprite):
-    def __init__(self, rect):
+    def __init__(self, rect, type="double"):
         super().__init__()
         self.rect = rect
+        self.type = type
 
     def draw(self, surf, camera):
         r = self.rect.move(-camera.x, -camera.y)
-        pygame.draw.ellipse(surf, POWERUP_COLOR, r)
+        # Color based on type
+        if self.type == "double":
+            color = POWERUP_COLOR          # purple
+        elif self.type == "shrink":
+            color = (50, 200, 50)         # green, for example
+        pygame.draw.ellipse(surf, color, r)
 
 
 class Player(pygame.sprite.Sprite):
@@ -149,6 +177,7 @@ class Player(pygame.sprite.Sprite):
         self.facing = 1  # 1 right, -1 left
         self.can_double_jump = False
         self.has_double_jump = False
+        self.can_shrink = False
         self.jump_was_pressed = False
         self.is_colliding_ladder = False
         self.is_small = False
@@ -161,14 +190,11 @@ class Player(pygame.sprite.Sprite):
         self.invuln_timer = 0
 
     def update(self, dt, solids, input_dir, jump_pressed, shrink_pressed):
-        # Note: jump_pressed is passed from main (so Space/W/Up are checked there).
-        # That keeps edge-detection (jump_pressed vs jump_was_pressed) consistent.
-
         if self.invuln_timer > 0:
             self.invuln_timer -= dt
 
-        # Handle shrinking input (toggle when S pressed)
-        if shrink_pressed and not self.is_small:
+        # Handle shrinking input (only if unlocked)
+        if shrink_pressed and not self.is_small and self.can_shrink:
             old_bottom = self.rect.bottom
             self.is_small = True
             self.rect.width = PLAYER_SIZE_SMALL[0]
@@ -205,20 +231,17 @@ class Player(pygame.sprite.Sprite):
         if input_dir != 0:
             self.facing = 1 if input_dir > 0 else -1
 
-        # Read keys for ladder up/down only (do NOT override jump_pressed param)
+        # Read keys for ladder up/down only
         keys = pygame.key.get_pressed()
         up = keys[pygame.K_UP] or keys[pygame.K_w]
         down = keys[pygame.K_DOWN] or keys[pygame.K_s]
 
-        # ---- Ladder behavior: only engage if player actively pressing up/down
+        # ---- Ladder behavior
         if ladder and (up or down):
-            # Enter ladder mode
             self.is_colliding_ladder = True
-            # Smooth horizontal centering
             lerp_factor = 0.2
             self.rect.centerx += (ladder.rect.centerx - self.rect.centerx) * lerp_factor
 
-            # Vertical ladder control
             if up:
                 self.vel.y = -150
             elif down:
@@ -227,36 +250,27 @@ class Player(pygame.sprite.Sprite):
                 self.vel.y = 0
 
         elif self.is_colliding_ladder and not ladder:
-            # Left ladder area — exit ladder mode
             self.is_colliding_ladder = False
-            # let gravity handle next frame
-
         else:
-            # Not actively climbing -> normal gravity applies
-            # Note: jump will be handled below via jump_pressed edge-detect
             self.vel.y += GRAVITY * dt
             self.vel.y = min(self.vel.y, MAX_FALL_SPEED)
 
-        # ---- Jumping (edge detection)
-        # Use the jump_pressed boolean passed from main (Space/W/Up)
+        # ---- Jumping
         if jump_pressed and not self.jump_was_pressed:
-            # Prioritize normal ground jump
             if self.on_ground:
                 self.vel.y = JUMP_VELOCITY
                 self.on_ground = False
                 self.has_double_jump = self.can_double_jump
             elif self.is_colliding_ladder:
-                # Jump off ladder immediately
                 self.is_colliding_ladder = False
                 self.vel.y = JUMP_VELOCITY
                 self.on_ground = False
                 self.has_double_jump = self.can_double_jump
             elif self.has_double_jump:
-                # Double jump
                 self.vel.y = JUMP_VELOCITY
                 self.has_double_jump = False
 
-        # ---- Move & resolve collisions (separate axes)
+        # ---- Move & resolve collisions
         self.on_ground = False
 
         # X axis
@@ -277,12 +291,12 @@ class Player(pygame.sprite.Sprite):
                     self.rect.bottom = s.rect.top
                     self.on_ground = True
                     self.vel.y = 0
-                    self.has_double_jump = self.can_double_jump  # reset on landing
+                    self.has_double_jump = self.can_double_jump
                 elif self.vel.y < 0:
                     self.rect.top = s.rect.bottom
                     self.vel.y = 0
 
-        # Fall damage (small)
+        # Fall damage
         if self.on_ground and self.vel.y >= 0:
             fall_distance = self.rect.y - self.last_y
             if fall_distance > 300:
@@ -292,7 +306,7 @@ class Player(pygame.sprite.Sprite):
         elif self.vel.y > 0:
             self.last_y = max(self.last_y, self.rect.y)
 
-        # Boundary clamping (horiz & top). Bottom allowed (falls into pit)
+        # Boundary clamping
         world_w = max(len(row) for row in LEVEL_MAP) * TILE_SIZE
         world_h = len(LEVEL_MAP) * TILE_SIZE
 
@@ -306,11 +320,9 @@ class Player(pygame.sprite.Sprite):
             self.rect.top = 0
             self.vel.y = 0
 
-        # Instant death if fallen into pit
         if self.rect.top > world_h:
             self.health = 0
 
-        # update jump edge-state (important)
         self.jump_was_pressed = jump_pressed
 
     def take_damage(self, dmg, knockback):
@@ -321,9 +333,8 @@ class Player(pygame.sprite.Sprite):
 
     def draw(self, surf, camera):
         r = self.rect.move(-camera.x, -camera.y)
-        # Flicker during invulnerability
         if self.invuln_timer > 0 and int(self.invuln_timer * 20) % 2 == 0:
-            return  # Don't draw (flicker effect)
+            return
 
         color = FG_COLOR if not self.is_small else (150, 220, 255)
         pygame.draw.rect(surf, color, r, border_radius=8)
@@ -369,8 +380,10 @@ def build_level():
                 solids.append(Platform(rect_from_grid(x, y), True))
             elif ch == 'P':
                 player_start = (x * TILE_SIZE, y * TILE_SIZE - (PLAYER_SIZE[1] - TILE_SIZE))
-            elif ch == '*':
-                powerups.append(Powerup(rect_from_grid(x, y)))
+            elif ch == 'J':
+                powerups.append(Powerup(rect_from_grid(x, y), type="double"))
+            elif ch == 'S':
+                powerups.append(Powerup(rect_from_grid(x, y), type="shrink"))
             elif ch == 'E':
                 enemy_x = x * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[0]) // 2
                 enemy_y = y * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[1]) // 2
@@ -381,7 +394,13 @@ def build_level():
                 dir = 1 if x > len(row) / 2 else -1
                 shooters.append(ShootingEnemy((enemy_x, enemy_y), dir))
             elif ch == '^':  # spikes
-                spikes.append(Spike(rect_from_grid(x, y)))
+                spike_rect = rect_from_grid(x, y)
+                spike_rect.width = TILE_SIZE // 2
+                spike_rect.height = TILE_SIZE // 2
+                spike_rect.left = x * TILE_SIZE  # align to the left edge of the block
+                spike_rect.bottom = (y + 1) * TILE_SIZE
+                spikes.append(Spike(spike_rect))
+
 
     return solids, powerups, enemies, shooters, spikes, player_start
 
@@ -410,7 +429,6 @@ def main():
         if spawn_protect > 0:
             spawn_protect -= dt
 
-        # Per-frame input flags
         jump_pressed = False
         shrink_pressed = False
         input_dir = 0
@@ -423,32 +441,27 @@ def main():
                     running = False
                 if e.key == pygame.K_r:
                     solids, powerups, enemies, shooters, spikes, player, projectiles, camera, spawn_protect = reset_game()
-                # note: we don't set jump_pressed only on KEYDOWN; continuous input below handles holding keys
-                if e.key == pygame.K_s or e.key == pygame.K_DOWN:
-                    # allow pressing S to start shrinking (we treat shrink as continuous)
-                    shrink_pressed = True
 
-        # Continuous input (movement + jump detection)
         keys = pygame.key.get_pressed()
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
             input_dir -= 1
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
             input_dir += 1
-        # Jump keys: Space, W, or Up arrow
         if keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]:
             jump_pressed = True
-        # Shrink: S or Down
         if keys[pygame.K_s] or keys[pygame.K_DOWN]:
             shrink_pressed = True
 
-        # Update player: pass jump_pressed and shrink_pressed
         player.update(dt, solids, input_dir, jump_pressed, shrink_pressed)
 
         # Powerup pickup
         if spawn_protect <= 0:
             for p in powerups[:]:
                 if player.rect.colliderect(p.rect):
-                    player.can_double_jump = True
+                    if p.type == "double":
+                        player.can_double_jump = True
+                    elif p.type == "shrink":
+                        player.can_shrink = True
                     powerups.remove(p)
 
         # Enemies (melee)
@@ -478,14 +491,12 @@ def main():
 
         camera.update(player.rect)
 
-        # Check for death → reset the level
         if player.health <= 0:
             solids, powerups, enemies, shooters, spikes, player, projectiles, camera, spawn_protect = reset_game()
 
         # ---------- Draw ----------
         screen.fill(BG_COLOR)
 
-        # Parallax background
         stripe_h = 80
         for i in range(0, HEIGHT // stripe_h + 2):
             y = i * stripe_h - int(camera.y * 0.15) % stripe_h
@@ -519,7 +530,6 @@ def main():
         for i, line in enumerate(info):
             screen.blit(font.render(line, True, (200, 200, 210)), (pad, pad + i * 18))
 
-        # Health bar under controls
         bar_w, bar_h = 200, 20
         bx, by = pad, pad + len(info) * 18 + 5
         pygame.draw.rect(screen, (100, 0, 0), (bx, by, bar_w, bar_h))
