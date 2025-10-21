@@ -154,6 +154,7 @@ class Player(pygame.sprite.Sprite):
         self.is_small = False
         self.shrink_timer = 0
         self.last_y = pos[1]
+        self.start_pos = pos  # Store starting position
 
         # Health
         self.max_health = 100
@@ -161,13 +162,10 @@ class Player(pygame.sprite.Sprite):
         self.invuln_timer = 0
 
     def update(self, dt, solids, input_dir, jump_pressed, shrink_pressed):
-        # Note: jump_pressed is passed from main (so Space/W/Up are checked there).
-        # That keeps edge-detection (jump_pressed vs jump_was_pressed) consistent.
-
         if self.invuln_timer > 0:
             self.invuln_timer -= dt
 
-        # Handle shrinking input (toggle when S pressed)
+        # Handle shrinking input
         if shrink_pressed and not self.is_small:
             old_bottom = self.rect.bottom
             self.is_small = True
@@ -186,7 +184,17 @@ class Player(pygame.sprite.Sprite):
                 self.rect.height = PLAYER_SIZE[1]
                 self.rect.bottom = old_bottom
 
-        # Ladder detection (narrower probe so player doesn't get stuck)
+                # Check if player is now stuck inside a solid block
+                for s in solids:
+                    if self.rect.colliderect(s.rect) and not s.is_ladder:
+                        # Player grew inside a block - teleport to start
+                        self.rect.x = self.start_pos[0]
+                        self.rect.y = self.start_pos[1]
+                        self.vel = pygame.Vector2(0, 0)
+                        self.health = self.max_health  # Reset health
+                        break
+
+        # Ladder detection
         probe = self.rect.inflate(-10, 0)
         ladder = next((s for s in solids if getattr(s, "is_ladder", False) and probe.colliderect(s.rect)), None)
 
@@ -205,20 +213,17 @@ class Player(pygame.sprite.Sprite):
         if input_dir != 0:
             self.facing = 1 if input_dir > 0 else -1
 
-        # Read keys for ladder up/down only (do NOT override jump_pressed param)
+        # Read keys for ladder up/down
         keys = pygame.key.get_pressed()
         up = keys[pygame.K_UP] or keys[pygame.K_w]
         down = keys[pygame.K_DOWN] or keys[pygame.K_s]
 
-        # ---- Ladder behavior: only engage if player actively pressing up/down
+        # ---- Ladder behavior
         if ladder and (up or down):
-            # Enter ladder mode
             self.is_colliding_ladder = True
-            # Smooth horizontal centering
             lerp_factor = 0.2
             self.rect.centerx += (ladder.rect.centerx - self.rect.centerx) * lerp_factor
 
-            # Vertical ladder control
             if up:
                 self.vel.y = -150
             elif down:
@@ -227,36 +232,28 @@ class Player(pygame.sprite.Sprite):
                 self.vel.y = 0
 
         elif self.is_colliding_ladder and not ladder:
-            # Left ladder area — exit ladder mode
             self.is_colliding_ladder = False
-            # let gravity handle next frame
 
         else:
-            # Not actively climbing -> normal gravity applies
-            # Note: jump will be handled below via jump_pressed edge-detect
             self.vel.y += GRAVITY * dt
             self.vel.y = min(self.vel.y, MAX_FALL_SPEED)
 
-        # ---- Jumping (edge detection)
-        # Use the jump_pressed boolean passed from main (Space/W/Up)
+        # ---- Jumping
         if jump_pressed and not self.jump_was_pressed:
-            # Prioritize normal ground jump
             if self.on_ground:
                 self.vel.y = JUMP_VELOCITY
                 self.on_ground = False
                 self.has_double_jump = self.can_double_jump
             elif self.is_colliding_ladder:
-                # Jump off ladder immediately
                 self.is_colliding_ladder = False
                 self.vel.y = JUMP_VELOCITY
                 self.on_ground = False
                 self.has_double_jump = self.can_double_jump
             elif self.has_double_jump:
-                # Double jump
                 self.vel.y = JUMP_VELOCITY
                 self.has_double_jump = False
 
-        # ---- Move & resolve collisions (separate axes)
+        # ---- Move & resolve collisions
         self.on_ground = False
 
         # X axis
@@ -277,22 +274,25 @@ class Player(pygame.sprite.Sprite):
                     self.rect.bottom = s.rect.top
                     self.on_ground = True
                     self.vel.y = 0
-                    self.has_double_jump = self.can_double_jump  # reset on landing
+                    self.has_double_jump = self.can_double_jump
                 elif self.vel.y < 0:
                     self.rect.top = s.rect.bottom
                     self.vel.y = 0
 
-        # Fall damage (small)
-        if self.on_ground and self.vel.y >= 0:
+        # Fall damage
+        if self.on_ground:
             fall_distance = self.rect.y - self.last_y
             if fall_distance > 300:
                 damage = int(fall_distance / 50)
                 self.health = max(0, self.health - damage)
             self.last_y = self.rect.y
-        elif self.vel.y > 0:
-            self.last_y = max(self.last_y, self.rect.y)
+        else:
+            # Track the highest point while in air
+            if self.vel.y < 0:  # Moving up (jumping)
+                self.last_y = self.rect.y
+            # If falling, keep last_y at the highest point
 
-        # Boundary clamping (horiz & top). Bottom allowed (falls into pit)
+        # Boundary clamping
         world_w = max(len(row) for row in LEVEL_MAP) * TILE_SIZE
         world_h = len(LEVEL_MAP) * TILE_SIZE
 
@@ -310,7 +310,6 @@ class Player(pygame.sprite.Sprite):
         if self.rect.top > world_h:
             self.health = 0
 
-        # update jump edge-state (important)
         self.jump_was_pressed = jump_pressed
 
     def take_damage(self, dmg, knockback):
@@ -323,7 +322,7 @@ class Player(pygame.sprite.Sprite):
         r = self.rect.move(-camera.x, -camera.y)
         # Flicker during invulnerability
         if self.invuln_timer > 0 and int(self.invuln_timer * 20) % 2 == 0:
-            return  # Don't draw (flicker effect)
+            return
 
         color = FG_COLOR if not self.is_small else (150, 220, 255)
         pygame.draw.rect(surf, color, r, border_radius=8)
@@ -380,7 +379,7 @@ def build_level():
                 enemy_y = y * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[1]) // 2
                 dir = 1 if x > len(row) / 2 else -1
                 shooters.append(ShootingEnemy((enemy_x, enemy_y), dir))
-            elif ch == '^':  # spikes
+            elif ch == '^':
                 spikes.append(Spike(rect_from_grid(x, y)))
 
     return solids, powerups, enemies, shooters, spikes, player_start
@@ -410,7 +409,6 @@ def main():
         if spawn_protect > 0:
             spawn_protect -= dt
 
-        # Per-frame input flags
         jump_pressed = False
         shrink_pressed = False
         input_dir = 0
@@ -423,25 +421,20 @@ def main():
                     running = False
                 if e.key == pygame.K_r:
                     solids, powerups, enemies, shooters, spikes, player, projectiles, camera, spawn_protect = reset_game()
-                # note: we don't set jump_pressed only on KEYDOWN; continuous input below handles holding keys
                 if e.key == pygame.K_s or e.key == pygame.K_DOWN:
-                    # allow pressing S to start shrinking (we treat shrink as continuous)
                     shrink_pressed = True
 
-        # Continuous input (movement + jump detection)
+        # Continuous input
         keys = pygame.key.get_pressed()
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
             input_dir -= 1
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
             input_dir += 1
-        # Jump keys: Space, W, or Up arrow
         if keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]:
             jump_pressed = True
-        # Shrink: S or Down
         if keys[pygame.K_s] or keys[pygame.K_DOWN]:
             shrink_pressed = True
 
-        # Update player: pass jump_pressed and shrink_pressed
         player.update(dt, solids, input_dir, jump_pressed, shrink_pressed)
 
         # Powerup pickup
@@ -451,7 +444,7 @@ def main():
                     player.can_double_jump = True
                     powerups.remove(p)
 
-        # Enemies (melee)
+        # Enemies
         for e in enemies:
             if player.rect.colliderect(e.rect):
                 knock_dir = 1 if player.rect.centerx < e.rect.centerx else -1
@@ -478,7 +471,7 @@ def main():
 
         camera.update(player.rect)
 
-        # Check for death → reset the level
+        # Check for death
         if player.health <= 0:
             solids, powerups, enemies, shooters, spikes, player, projectiles, camera, spawn_protect = reset_game()
 
@@ -519,7 +512,7 @@ def main():
         for i, line in enumerate(info):
             screen.blit(font.render(line, True, (200, 200, 210)), (pad, pad + i * 18))
 
-        # Health bar under controls
+        # Health bar
         bar_w, bar_h = 200, 20
         bx, by = pad, pad + len(info) * 18 + 5
         pygame.draw.rect(screen, (100, 0, 0), (bx, by, bar_w, bar_h))
