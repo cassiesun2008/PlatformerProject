@@ -51,7 +51,31 @@ LEVEL_MAP = [
     "####################------###################------###################################################################",
 ]
 
+LEVEL_MAP_2 = [
+    "######################################################################################################################",
+    "######################################################################################################################",
+    "##----------------------------------------------------------------------------------------------------------------##",
+    "##----------------------------------------------------------------------------------------------------------------##",
+    "##----------------------------------------------------------------------------------------------------------------##",
+    "##-----------------------------------------------------------------------------------------------------------------##",
+    "##----------------------------------------------------------------------------------------------------------------##",
+    "##----------------------------------------------------------------------------------------------------------------##",
+    "##----------------------------------------------------------------------------------------------------------------##",
+    "##-----------------------------------------------------------E----------------------------------------------------##",
+    "##----------------------------------------------------------------###------------------------------------------##",
+    "##---------------------------------------------------####-------------F----------------------------------------##",
+    "##-----------------------------------------------------------------------------------------------------------------##",
+    "##-----------------------------------------------------------------------------------------------------------------##",
+    "##-----------------------------------------------------------------^^^---------------------------------------------##",
+    "##P------------------------------------------------------------------------------------------------------------^^^^##",
+    "####################------###############------###################################################################",
+    "####################------###############------###################################################################",
+]
+
 TILE_SIZE = 48
+
+# Current level
+current_level = 1
 
 
 # -------------- Helpers --------------
@@ -100,9 +124,6 @@ class Spike(pygame.sprite.Sprite):
         # draw both
         pygame.draw.polygon(surf, (255, 255, 100), points1)
         pygame.draw.polygon(surf, (255, 255, 100), points2)
-
-
-
 
 
 class Enemy(pygame.sprite.Sprite):
@@ -162,9 +183,9 @@ class Powerup(pygame.sprite.Sprite):
         r = self.rect.move(-camera.x, -camera.y)
         # Color based on type
         if self.type == "double":
-            color = POWERUP_COLOR          # purple
+            color = POWERUP_COLOR  # purple
         elif self.type == "shrink":
-            color = (50, 200, 50)         # green, for example
+            color = (50, 200, 50)  # green
         pygame.draw.ellipse(surf, color, r)
 
 
@@ -191,9 +212,6 @@ class Player(pygame.sprite.Sprite):
         self.invuln_timer = 0
 
     def update(self, dt, solids, input_dir, jump_pressed, shrink_pressed):
-        # Note: jump_pressed is passed from main (so Space/W/Up are checked there).
-        # That keeps edge-detection (jump_pressed vs jump_was_pressed) consistent.
-
         if self.invuln_timer > 0:
             self.invuln_timer -= dt
 
@@ -224,6 +242,7 @@ class Player(pygame.sprite.Sprite):
                         self.rect.y = self.start_pos[1]
                         self.vel = pygame.Vector2(0, 0)
                         self.health = self.max_health  # Reset health
+                        self.last_y = self.start_pos[1]  # Reset fall tracking
                         break
 
         # Ladder detection
@@ -245,20 +264,17 @@ class Player(pygame.sprite.Sprite):
         if input_dir != 0:
             self.facing = 1 if input_dir > 0 else -1
 
-        # Read keys for ladder up/down only (do NOT override jump_pressed param)
+        # Read keys for ladder up/down
         keys = pygame.key.get_pressed()
         up = keys[pygame.K_UP] or keys[pygame.K_w]
         down = keys[pygame.K_DOWN] or keys[pygame.K_s]
 
         # ---- Ladder behavior
         if ladder and (up or down):
-            # Enter ladder mode
             self.is_colliding_ladder = True
-            # Smooth horizontal centering
             lerp_factor = 0.2
             self.rect.centerx += (ladder.rect.centerx - self.rect.centerx) * lerp_factor
 
-            # Vertical ladder control
             if up:
                 self.vel.y = -150
             elif down:
@@ -267,31 +283,24 @@ class Player(pygame.sprite.Sprite):
                 self.vel.y = 0
 
         elif self.is_colliding_ladder and not ladder:
-            # Left ladder area — exit ladder mode
             self.is_colliding_ladder = False
-            # let gravity handle next frame
 
         else:
-            # Not actively climbing -> normal gravity applies
-            # Note: jump will be handled below via jump_pressed edge-detect
             self.vel.y += GRAVITY * dt
             self.vel.y = min(self.vel.y, MAX_FALL_SPEED)
 
         # ---- Jumping
         if jump_pressed and not self.jump_was_pressed:
-            # Prioritize normal ground jump
             if self.on_ground:
                 self.vel.y = JUMP_VELOCITY
                 self.on_ground = False
                 self.has_double_jump = self.can_double_jump
             elif self.is_colliding_ladder:
-                # Jump off ladder immediately
                 self.is_colliding_ladder = False
                 self.vel.y = JUMP_VELOCITY
                 self.on_ground = False
                 self.has_double_jump = self.can_double_jump
             elif self.has_double_jump:
-                # Double jump
                 self.vel.y = JUMP_VELOCITY
                 self.has_double_jump = False
 
@@ -322,7 +331,7 @@ class Player(pygame.sprite.Sprite):
                     self.vel.y = 0
 
         # Fall damage
-        if self.on_ground and self.vel.y >= 0:
+        if self.on_ground:
             fall_distance = self.rect.y - self.last_y
             if fall_distance > 300:
                 damage = int(fall_distance / 50)
@@ -332,11 +341,11 @@ class Player(pygame.sprite.Sprite):
             # Track the highest point while in air
             if self.vel.y < 0:  # Moving up (jumping)
                 self.last_y = self.rect.y
-            # If falling, keep last_y at the highest point
 
-        # Boundary clamping (horiz & top). Bottom allowed (falls into pit)
-        world_w = max(len(row) for row in LEVEL_MAP) * TILE_SIZE
-        world_h = len(LEVEL_MAP) * TILE_SIZE
+        # Boundary clamping
+        level_map = LEVEL_MAP if current_level == 1 else LEVEL_MAP_2
+        world_w = max(len(row) for row in level_map) * TILE_SIZE
+        world_h = len(level_map) * TILE_SIZE
 
         if self.rect.left < 0:
             self.rect.left = 0
@@ -352,7 +361,6 @@ class Player(pygame.sprite.Sprite):
         if self.rect.top > world_h:
             self.health = 0
 
-        # update jump edge-state (important)
         self.jump_was_pressed = jump_pressed
 
     def take_damage(self, dmg, knockback):
@@ -394,16 +402,18 @@ class Camera:
         elif target_rect.centery - self.y > HEIGHT - margin_y:
             self.y = target_rect.centery - (HEIGHT - margin_y)
 
-        world_w = max(len(row) for row in LEVEL_MAP) * TILE_SIZE
-        world_h = len(LEVEL_MAP) * TILE_SIZE
+        level_map = LEVEL_MAP if current_level == 1 else LEVEL_MAP_2
+        world_w = max(len(row) for row in level_map) * TILE_SIZE
+        world_h = len(level_map) * TILE_SIZE
         self.x = max(0, min(self.x, world_w - WIDTH))
         self.y = max(0, min(self.y, world_h - HEIGHT))
 
 
-def build_level():
+def build_level(level_num):
+    level_map = LEVEL_MAP if level_num == 1 else LEVEL_MAP_2
     solids, powerups, enemies, shooters, spikes = [], [], [], [], []
     player_start = START_POS
-    for y, row in enumerate(LEVEL_MAP):
+    for y, row in enumerate(level_map):
         for x, ch in enumerate(row):
             if ch == '#':
                 solids.append(Platform(rect_from_grid(x, y)))
@@ -424,20 +434,21 @@ def build_level():
                 enemy_y = y * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[1]) // 2
                 dir = 1 if x > len(row) / 2 else -1
                 shooters.append(ShootingEnemy((enemy_x, enemy_y), dir))
-            elif ch == '^':  # spikes
+            elif ch == '^':
                 spike_rect = rect_from_grid(x, y)
                 spike_rect.width = TILE_SIZE // 2
                 spike_rect.height = TILE_SIZE // 2
-                spike_rect.left = x * TILE_SIZE  # align to the left edge of the block
+                spike_rect.left = x * TILE_SIZE
                 spike_rect.bottom = (y + 1) * TILE_SIZE
                 spikes.append(Spike(spike_rect))
-
 
     return solids, powerups, enemies, shooters, spikes, player_start
 
 
 # -------------- Main --------------
 def main():
+    global current_level
+
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption(TITLE)
@@ -445,7 +456,7 @@ def main():
     font = pygame.font.SysFont("verdana", 16)
 
     def reset_game():
-        solids, powerups, enemies, shooters, spikes, start = build_level()
+        solids, powerups, enemies, shooters, spikes, start = build_level(current_level)
         player = Player(start)
         projectiles = []
         camera = Camera()
@@ -460,7 +471,6 @@ def main():
         if spawn_protect > 0:
             spawn_protect -= dt
 
-        # Per-frame input flags
         jump_pressed = False
         shrink_pressed = False
         input_dir = 0
@@ -473,25 +483,26 @@ def main():
                     running = False
                 if e.key == pygame.K_r:
                     solids, powerups, enemies, shooters, spikes, player, projectiles, camera, spawn_protect = reset_game()
-                # note: we don't set jump_pressed only on KEYDOWN; continuous input below handles holding keys
+                if e.key == pygame.K_1:
+                    current_level = 1
+                    solids, powerups, enemies, shooters, spikes, player, projectiles, camera, spawn_protect = reset_game()
+                if e.key == pygame.K_2:
+                    current_level = 2
+                    solids, powerups, enemies, shooters, spikes, player, projectiles, camera, spawn_protect = reset_game()
                 if e.key == pygame.K_s or e.key == pygame.K_DOWN:
-                    # allow pressing S to start shrinking (we treat shrink as continuous)
                     shrink_pressed = True
 
-        # Continuous input (movement + jump detection)
+        # Continuous input
         keys = pygame.key.get_pressed()
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
             input_dir -= 1
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
             input_dir += 1
-        # Jump keys: Space, W, or Up arrow
         if keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]:
             jump_pressed = True
-        # Shrink: S or Down
         if keys[pygame.K_s] or keys[pygame.K_DOWN]:
             shrink_pressed = True
 
-        # Update player: pass jump_pressed and shrink_pressed
         player.update(dt, solids, input_dir, jump_pressed, shrink_pressed)
 
         # Powerup pickup
@@ -531,7 +542,7 @@ def main():
 
         camera.update(player.rect)
 
-        # Check for death → reset the level
+        # Check for death
         if player.health <= 0:
             solids, powerups, enemies, shooters, spikes, player, projectiles, camera, spawn_protect = reset_game()
 
@@ -562,9 +573,9 @@ def main():
         # --- UI ---
         pad = 10
         info = [
-            f"FPS: {clock.get_fps():.0f}",
+            f"FPS: {clock.get_fps():.0f}  Level: {current_level}",
             "Move: ← → or A/D   Jump: Space/W/↑   Shrink: S/↓",
-            "Reset: R   Quit: Esc or Q",
+            "Reset: R   Switch Level: 1/2   Quit: Esc or Q",
         ]
         if player.is_small:
             info.append(f"Small mode: {player.shrink_timer:.1f}s remaining")
