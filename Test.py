@@ -28,6 +28,7 @@ MONSTER_COLOR = (255, 50, 50)
 ENEMY_SIZE = (36, 36)
 PROJECTILE_COLOR = (255, 100, 0)
 POWERUP_COLOR = (147, 112, 219)
+FLAG_COLOR = (255, 215, 0)
 
 # -------------- Level data --------------
 LEVEL_MAP = [
@@ -46,7 +47,7 @@ LEVEL_MAP = [
     "##-----------L#-----------###------------------------F###-----##----------------------------------------------------##",
     "##-----------L#-------------------------###-----------###--F----------F----EEEEEEE--------F-------------------------##",
     "##-----------L-----------------E----F-----------------###------------------#######----------------------------------##",
-    "##------P----L--^^^-------------------------------------------^^^^--------------------------------------------------##",
+    "##------P----L--^^^-------------------------------------------^^^^----------------------------------------------G---##",
     "####################------###################------###################################################################",
     "####################------###################------###################################################################",
 ]
@@ -167,6 +168,26 @@ class Powerup(pygame.sprite.Sprite):
             color = (50, 200, 50)         # green, for example
         pygame.draw.ellipse(surf, color, r)
 
+class Flag(pygame.sprite.Sprite):
+    def __init__(self, rect):
+        super().__init__()
+        self.rect = rect
+
+    def draw(self, surf, camera):
+        r = self.rect.move(-camera.x, -camera.y)
+        # Draw flagpole
+        pole_rect = pygame.Rect(r.left + r.width//2 - 2, r.top, 4, r.height)
+        pygame.draw.rect(surf, (180, 180, 180), pole_rect)
+        # Draw flag
+        pygame.draw.polygon(
+            surf,
+            FLAG_COLOR,
+            [
+                (pole_rect.right, r.top),
+                (pole_rect.right + 20, r.top + 10),
+                (pole_rect.right, r.top + 20)
+            ]
+        )
 
 class Player(pygame.sprite.Sprite):
     def __init__(self, pos):
@@ -401,7 +422,7 @@ class Camera:
 
 
 def build_level():
-    solids, powerups, enemies, shooters, spikes = [], [], [], [], []
+    solids, powerups, enemies, shooters, spikes, flags = [], [], [], [], [], []
     player_start = START_POS
     for y, row in enumerate(LEVEL_MAP):
         for x, ch in enumerate(row):
@@ -431,9 +452,11 @@ def build_level():
                 spike_rect.left = x * TILE_SIZE  # align to the left edge of the block
                 spike_rect.bottom = (y + 1) * TILE_SIZE
                 spikes.append(Spike(spike_rect))
+            elif ch == 'G':  # <-- flag
+                flags.append(Flag(rect_from_grid(x, y)))
 
 
-    return solids, powerups, enemies, shooters, spikes, player_start
+    return solids, powerups, enemies, shooters, spikes, flags, player_start
 
 
 # -------------- Main --------------
@@ -445,14 +468,14 @@ def main():
     font = pygame.font.SysFont("verdana", 16)
 
     def reset_game():
-        solids, powerups, enemies, shooters, spikes, start = build_level()
+        solids, powerups, enemies, shooters, spikes, flags, start = build_level()
         player = Player(start)
         projectiles = []
         camera = Camera()
         spawn_protect = 0.15
-        return solids, powerups, enemies, shooters, spikes, player, projectiles, camera, spawn_protect
+        return solids, powerups, enemies, shooters, spikes, flags, player, projectiles, camera, spawn_protect
 
-    solids, powerups, enemies, shooters, spikes, player, projectiles, camera, spawn_protect = reset_game()
+    solids, powerups, enemies, shooters, spikes, flags, player, projectiles, camera, spawn_protect = reset_game()
 
     running = True
     while running:
@@ -531,6 +554,13 @@ def main():
 
         camera.update(player.rect)
 
+        # --- Flag detection (level complete) ---
+        for f in flags:
+            if player.rect.colliderect(f.rect):
+                # Simple example: reset game or show message
+                print("Level complete!")
+                solids, powerups, enemies, shooters, spikes, flags, player, projectiles, camera, spawn_protect = reset_game()
+
         # Check for death → reset the level
         if player.health <= 0:
             solids, powerups, enemies, shooters, spikes, player, projectiles, camera, spawn_protect = reset_game()
@@ -556,6 +586,8 @@ def main():
             proj.draw(screen, camera)
         for spike in spikes:
             spike.draw(screen, camera)
+        for f in flags:
+            f.draw(screen, camera)
 
         player.draw(screen, camera)
 
