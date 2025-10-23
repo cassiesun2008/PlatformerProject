@@ -47,7 +47,7 @@ LEVEL_MAP = [
     "##-----------L#-----------###------------------------F###-----##----------------------------------------------------##",
     "##-----------L#-------------------------###-----------###--F----------F----EEEEEEE--------F-------------------------##",
     "##-----------L-----------------E----F-----------------###------------------#######----------------------------------##",
-    "##------P----L--^^^-------------------------------------------^^^^----------------------------------------------G---##",
+    "##C-------P--L--^^^-------------------------------------------^^^^---------------------C---------C--------------G---##",
     "####################------###################------###################################################################",
     "####################------###################------###################################################################",
 ]
@@ -156,6 +156,33 @@ class ShootingEnemy(pygame.sprite.Sprite):
     def draw(self, surf, camera):
         r = self.rect.move(-camera.x, -camera.y)
         pygame.draw.rect(surf, (255, 150, 0), r, border_radius=6)
+
+class PatrolEnemy(pygame.sprite.Sprite):
+    def __init__(self, pos, patrol_distance=300, speed=120):
+        super().__init__()
+        self.rect = pygame.Rect(pos[0], pos[1], *ENEMY_SIZE)
+        self.start_x = pos[0]
+        self.patrol_distance = patrol_distance
+        self.speed = speed
+        self.direction = 1  # 1 = right, -1 = left
+
+    def update(self, dt):
+        # Move left and right within the patrol range
+        self.rect.x += self.direction * self.speed * dt
+
+        # Reverse direction if reached patrol boundaries
+        if self.rect.x > self.start_x + self.patrol_distance:
+            self.rect.x = self.start_x + self.patrol_distance
+            self.direction = -1
+        elif self.rect.x < self.start_x:
+            self.rect.x = self.start_x
+            self.direction = 1
+
+    def draw(self, surf, camera):
+        r = self.rect.move(-camera.x, -camera.y)
+        color = (200, 80, 80)
+        pygame.draw.rect(surf, color, r, border_radius=6)
+
 
 
 class Projectile(pygame.sprite.Sprite):
@@ -466,6 +493,10 @@ def build_level(level_num):
                 spikes.append(Spike(spike_rect))
             elif ch == 'G':
                 flags.append(Flag(rect_from_grid(x, y)))
+            elif ch == "C":
+                enemy_x = x * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[0]) // 2
+                enemy_y = y * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[1]) // 2
+                enemies.append(PatrolEnemy((enemy_x, enemy_y), patrol_distance=300, speed=120))
 
     return solids, powerups, enemies, shooters, spikes, flags, player_start
 
@@ -540,8 +571,10 @@ def main():
                         player.can_shrink = True
                     powerups.remove(p)
 
-        # Enemies
+        # Enemies (normal + chasing)
         for e in enemies:
+            if isinstance(e, PatrolEnemy):
+                e.update(dt)
             if player.rect.colliderect(e.rect):
                 knock_dir = 1 if player.rect.centerx < e.rect.centerx else -1
                 player.take_damage(10, (-knock_dir * 300, -400))
