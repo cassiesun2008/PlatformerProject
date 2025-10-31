@@ -31,7 +31,7 @@ POWERUP_COLOR = (147, 112, 219)
 FLAG_COLOR = (255, 215, 0)
 
 # -------------- Level data --------------
-LEVEL_MAP = [
+LEVEL_MAP_1 = [
     "######################################################################################################################",
     "######################################################################################################################",
     "##----------------------------------------------------###-----------------------------------------------------------##",
@@ -48,8 +48,8 @@ LEVEL_MAP = [
     "##-----------L#-------------------------###-----------###--F----------F----EEEEEEE--------F-------------------------##",
     "##-----------L-----------------E----F-----------------###------------------#######----------------------------------##",
     "##C-------P--L--^^^-------------------------------------------^^^^---------------------C---------C--------------G---##",
-    "####################------###################------###################################################################",
-    "####################------###################------###################################################################",
+    "####################------###################-----####################################################################",
+    "####################------###################-----####################################################################",
 ]
 
 LEVEL_MAP_2 = [
@@ -71,6 +71,27 @@ LEVEL_MAP_2 = [
     "##P-------------------------------------------------------------------------------------------------------G---##",
     "############################################################################################################------##",
     "######################################################################################################################",
+]
+
+LEVEL_MAP_3 = [
+    "######################################################################################################################",
+    "######################################################################################################################",
+    "##----------------------------------------------------------##############------------------------------------------##",
+    "##---------------------------------------------------------S-------------------------------------F------------------##",
+    "##--------------------------------------------------------L###############------------------------------------------##",
+    "##--------------------------------------------------------L-----##########E-----------------------------------------##",
+    "##------------------------------F-----L###--J-------------L-----##########E-----H-----------------------------------##",
+    "##------------------------------------L-------------------L-----##########E-######----------------------------------##",
+    "##------------------------F-----------L-------------------L-----##########E-----------------------------------------##",
+    "##------------------------------------L----------------####-----##########E-----------------------------------------##",
+    "##----------------------F-------------L-------------E-----------##########E----------------------------------F------##",
+    "##-----------------F----------------###-------------------------##########E-----------------------F-----------------##",
+    "##-----------------------------##--------------#######----------##########E-----------------------------------------##",
+    "##-------F----------------##------------------------------------##########E-----------------------------------------##",
+    "##-------------------##-----------------------------------------##########E-----------------------------------------##",
+    "##P--------C----C-------------C--------------^^^^^--------------##########E-C-----------------C-----C---C-------G---##",
+    "########################--##############################--------##################------##############################",
+    "########################--##############################--------##################------##############################",
 ]
 
 TILE_SIZE = 48
@@ -102,27 +123,27 @@ class Platform(pygame.sprite.Sprite):
 class Spike(pygame.sprite.Sprite):
     def __init__(self, rect):
         super().__init__()
-        self.rect = rect
+        # Double the width of the hitbox to cover both spikes
+        self.rect = pygame.Rect(rect.x, rect.y, rect.width * 2, rect.height)
 
     def draw(self, surf, camera):
         r = self.rect.move(-camera.x, -camera.y)
+        half_width = r.width // 2
 
-        # first spike (left)
+        # First spike (left)
         points1 = [
             (r.left, r.bottom),
-            (r.centerx, r.top),
+            (r.left + half_width // 2, r.top),
+            (r.left + half_width, r.bottom)
+        ]
+
+        # Second spike (right)
+        points2 = [
+            (r.left + half_width, r.bottom),
+            (r.left + 3 * half_width // 2, r.top),
             (r.right, r.bottom)
         ]
 
-        # second spike (right), shifted horizontally
-        offset = r.width  # distance between spikes
-        points2 = [
-            (r.left + offset, r.bottom),
-            (r.centerx + offset, r.top),
-            (r.right + offset, r.bottom)
-        ]
-
-        # draw both
         pygame.draw.polygon(surf, (255, 255, 100), points1)
         pygame.draw.polygon(surf, (255, 255, 100), points2)
 
@@ -214,6 +235,8 @@ class Powerup(pygame.sprite.Sprite):
             color = POWERUP_COLOR          # purple
         elif self.type == "shrink":
             color = (50, 200, 50)         # green
+        elif self.type == "health":
+            color = (100, 150, 255)       # blue
         pygame.draw.ellipse(surf, color, r)
 
 
@@ -384,7 +407,7 @@ class Player(pygame.sprite.Sprite):
         if self.on_ground:
             fall_distance = self.rect.y - self.last_y
             if fall_distance > 300:
-                damage = int(fall_distance / 50)
+                damage = int(fall_distance / 40)
                 self.health = max(0, self.health - damage)
             self.last_y = self.rect.y
         else:
@@ -393,7 +416,14 @@ class Player(pygame.sprite.Sprite):
                 self.last_y = self.rect.y
 
         # Boundary clamping
-        level_map = LEVEL_MAP if current_level == 1 else LEVEL_MAP_2
+        if current_level == 1:
+            level_map = LEVEL_MAP_1
+        elif current_level == 2:
+            level_map = LEVEL_MAP_2
+        elif current_level == 3:
+            level_map = LEVEL_MAP_3
+        else:
+            level_map = LEVEL_MAP_1
         world_w = max(len(row) for row in level_map) * TILE_SIZE
         world_h = len(level_map) * TILE_SIZE
 
@@ -452,7 +482,7 @@ class Camera:
         elif target_rect.centery - self.y > HEIGHT - margin_y:
             self.y = target_rect.centery - (HEIGHT - margin_y)
 
-        level_map = LEVEL_MAP if current_level == 1 else LEVEL_MAP_2
+        level_map = LEVEL_MAP_1 if current_level == 1 else LEVEL_MAP_2
         world_w = max(len(row) for row in level_map) * TILE_SIZE
         world_h = len(level_map) * TILE_SIZE
         self.x = max(0, min(self.x, world_w - WIDTH))
@@ -460,7 +490,15 @@ class Camera:
 
 
 def build_level(level_num):
-    level_map = LEVEL_MAP if level_num == 1 else LEVEL_MAP_2
+    if level_num == 1:
+        level_map = LEVEL_MAP_1
+    elif level_num == 2:
+        level_map = LEVEL_MAP_2
+    elif level_num == 3:
+        level_map = LEVEL_MAP_3
+    else:
+        level_map = LEVEL_MAP_1  # fallback
+
     solids, powerups, enemies, shooters, spikes, flags = [], [], [], [], [], []
     player_start = START_POS
     for y, row in enumerate(level_map):
@@ -475,6 +513,8 @@ def build_level(level_num):
                 powerups.append(Powerup(rect_from_grid(x, y), type="double"))
             elif ch == 'S':
                 powerups.append(Powerup(rect_from_grid(x, y), type="shrink"))
+            elif ch == 'H':
+                powerups.append(Powerup(rect_from_grid(x, y), type="health"))
             elif ch == 'E':
                 enemy_x = x * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[0]) // 2
                 enemy_y = y * TILE_SIZE + (TILE_SIZE - ENEMY_SIZE[1]) // 2
@@ -569,6 +609,8 @@ def main():
                         player.can_double_jump = True
                     elif p.type == "shrink":
                         player.can_shrink = True
+                    elif p.type == "health":
+                        player.health = min(player.max_health, player.health + 30)  # heal 30 HP
                     powerups.remove(p)
 
         # Enemies (normal + chasing)
@@ -577,7 +619,7 @@ def main():
                 e.update(dt)
             if player.rect.colliderect(e.rect):
                 knock_dir = 1 if player.rect.centerx < e.rect.centerx else -1
-                player.take_damage(10, (-knock_dir * 300, -400))
+                player.take_damage(20, (-knock_dir * 300, -400))
 
         # Shooting enemies + projectiles
         for s in shooters:
@@ -603,19 +645,35 @@ def main():
         # --- Flag detection (level complete) ---
         for f in flags:
             if player.rect.colliderect(f.rect):
-                # Move to next level
                 if current_level == 1:
+                    print("Level 1 complete! Moving to Level 2...")
                     current_level = 2
                     solids, powerups, enemies, shooters, spikes, flags, player, projectiles, camera, spawn_protect = reset_game()
-                else:
-                    # Beat level 2, restart from level 1
-                    print("You won! Restarting from Level 1")
-                    current_level = 1
+
+                elif current_level == 2:
+                    print("Level 2 complete! Moving to Level 3...")
+                    current_level = 3
                     solids, powerups, enemies, shooters, spikes, flags, player, projectiles, camera, spawn_protect = reset_game()
+
+
+                elif current_level == 3:
+
+                    print("🎉 You win! Congratulations! 🎉")
+                    # Display a "You Win" message on screen before quitting
+                    font = pygame.font.SysFont("verdana", 40)
+                    win_text = font.render("YOU WIN! CONGRATULATIONS!", True, (255, 255, 0))
+                    screen.fill((0, 0, 0))
+                    text_rect = win_text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+                    screen.blit(win_text, text_rect)
+                    pygame.display.flip()
+                    pygame.time.delay(4000)  # wait 4 seconds
+                    running = False  # exit the main loop
 
         # Check for death
         if player.health <= 0:
             solids, powerups, enemies, shooters, spikes, flags, player, projectiles, camera, spawn_protect = reset_game()
+            player.can_double_jump = False
+            player.can_shrink = False
 
         # ---------- Draw ----------
         screen.fill(BG_COLOR)
@@ -648,7 +706,7 @@ def main():
         info = [
             f"FPS: {clock.get_fps():.0f}  Level: {current_level}",
             "Move: ← → or A/D   Jump: Space/W/↑   Shrink: S/↓",
-            "Reset: R   Switch Level: 1/2   Quit: Esc or Q",
+            "Reset: R   Quit: Esc or Q",
         ]
         if player.is_small:
             info.append(f"Small mode: {player.shrink_timer:.1f}s remaining")
